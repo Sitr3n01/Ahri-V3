@@ -1,0 +1,828 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ================================================================
+   Ahri V3 - Agent Core Design System
+   Version: 3.1.0
+   ================================================================ */
+
+/* ============================================================
+   CSS Variables - Agent Core Tokens
+   ============================================================ */
+
+:root {
+  /* Base Colors (Dark Neutral) */
+  --agent-bg-primary: #0a0a0a;        /* Pure black base */
+  --agent-bg-secondary: #141414;      /* Elevated surfaces */
+  --agent-bg-tertiary: #1e1e1e;       /* Cards, panels */
+  --agent-border: #2a2a2a;            /* Subtle dividers */
+  --agent-border-strong: #404040;     /* Emphasized borders */
+
+  /* Text Colors */
+  --agent-text-primary: #e8e8e8;      /* Main text */
+  --agent-text-secondary: #a0a0a0;    /* Muted text */
+  --agent-text-tertiary: #606060;     /* Disabled/placeholder */
+
+  /* Semantic Colors */
+  --agent-success: #22c55e;
+  --agent-warning: #f59e0b;
+  --agent-error: #ef4444;
+  --agent-info: #3b82f6;
+
+  /* Agent Status Colors */
+  --agent-idle: #64748b;
+  --agent-thinking: #3b82f6;
+  --agent-working: #8b5cf6;
+  --agent-completed: #22c55e;
+  --agent-failed: #ef4444;
+
+  /* Code/Data Display */
+  --agent-code-bg: #0d0d0d;
+  --agent-code-border: #262626;
+
+  /* Typography */
+  --font-sans: 'Inter', 'SF Pro', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+
+  /* Font Sizes (rem for accessibility) */
+  --text-xs: 0.6875rem;   /* 11px - timestamps, badges */
+  --text-sm: 0.8125rem;   /* 13px - secondary text */
+  --text-base: 0.875rem;  /* 14px - body text */
+  --text-md: 0.9375rem;   /* 15px - emphasized text */
+  --text-lg: 1.125rem;    /* 18px - headings */
+  --text-xl: 1.5rem;      /* 24px - page titles */
+
+  /* Spacing */
+  --space-1: 0.25rem;   /* 4px */
+  --space-2: 0.5rem;    /* 8px */
+  --space-3: 0.75rem;   /* 12px */
+  --space-4: 1rem;      /* 16px */
+  --space-6: 1.5rem;    /* 24px */
+  --space-8: 2rem;      /* 32px */
+
+  /* Border Radius (Sharp Corners) */
+  --radius-sm: 4px;     /* Small elements */
+  --radius-md: 6px;     /* Default */
+  --radius-lg: 8px;     /* Cards */
+  --radius-xl: 12px;    /* Modals */
+
+  /* Component Sizing */
+  --sidebar-width: 200px;
+  --command-bar-height: 40px;
+  --status-bar-height: 24px;
+  --panel-width-sm: 280px;
+  --panel-width-md: 360px;
+  --panel-width-lg: 480px;
+
+  /* Persona Theme (Dynamic, default to Ahri) */
+  --persona-primary: #d8b4d8;
+  --persona-secondary: #e9cce9;
+  --persona-shadow: rgba(192, 132, 192, 0.25);
+  --persona-glow: rgba(216, 180, 216, 0.6);
+
+  /* Agent Accent (Uses persona primary) */
+  --agent-accent: var(--persona-primary);
+}
+
+/* ============================================================
+   Base Styles
+   ============================================================ */
+
+body {
+  font-family: var(--font-sans);
+  background: var(--agent-bg-primary);
+  color: var(--agent-text-primary);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Headings */
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+h1 { font-size: var(--text-xl); }
+h2 { font-size: var(--text-lg); }
+h3 { font-size: var(--text-md); }
+
+/* Code */
+code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+pre {
+  font-family: var(--font-mono);
+  background: var(--agent-code-bg);
+  border: 1px solid var(--agent-code-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  overflow-x: auto;
+}
+
+/* ============================================================
+   Utility Classes - Surface Elevations
+   ============================================================ */
+
+@layer utilities {
+  /* Surface Levels */
+  .surface-0 {
+    background: var(--agent-bg-primary);
+  }
+
+  .surface-1 {
+    background: var(--agent-bg-secondary);
+    border: 1px solid var(--agent-border);
+  }
+
+  .surface-2 {
+    background: var(--agent-bg-tertiary);
+    border: 1px solid var(--agent-border-strong);
+  }
+
+  /* Agent Panel (Sidebar) */
+  .agent-panel {
+    background: var(--agent-bg-secondary);
+    border-right: 1px solid var(--agent-border);
+    width: var(--sidebar-width);
+  }
+
+  /* Agent Card */
+  .agent-card {
+    background: var(--agent-bg-tertiary);
+    border: 1px solid var(--agent-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+  }
+
+  /* Agent Input */
+  .agent-input {
+    background: var(--agent-bg-primary);
+    border: 1px solid var(--agent-border);
+    color: var(--agent-text-primary);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    transition: border-color 0.2s ease;
+  }
+
+  .agent-input:focus {
+    outline: none;
+    border-color: var(--agent-accent);
+  }
+
+  .agent-input::placeholder {
+    color: var(--agent-text-tertiary);
+  }
+
+  /* Agent Buttons */
+  .agent-button-primary {
+    background: var(--agent-accent);
+    color: #000;
+    font-weight: 600;
+    font-size: var(--text-sm);
+    border: none;
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: opacity 0.2s ease;
+  }
+
+  .agent-button-primary:hover {
+    opacity: 0.9;
+  }
+
+  .agent-button-primary:active {
+    opacity: 0.8;
+  }
+
+  .agent-button-ghost {
+    background: transparent;
+    color: var(--agent-text-secondary);
+    font-size: var(--text-sm);
+    border: 1px solid var(--agent-border);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .agent-button-ghost:hover {
+    color: var(--agent-text-primary);
+    border-color: var(--agent-border-strong);
+    background: var(--agent-bg-secondary);
+  }
+
+  .agent-button-icon {
+    background: transparent;
+    color: var(--agent-text-secondary);
+    border: none;
+    padding: var(--space-2);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .agent-button-icon:hover {
+    color: var(--agent-text-primary);
+    background: var(--agent-bg-tertiary);
+  }
+
+  /* Status Indicators */
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  .status-badge {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--radius-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+  }
+
+  /* Status Colors */
+  .status-idle {
+    background: var(--agent-idle);
+  }
+
+  .status-thinking {
+    background: var(--agent-thinking);
+  }
+
+  .status-working {
+    background: var(--agent-working);
+  }
+
+  .status-completed {
+    background: var(--agent-completed);
+  }
+
+  .status-failed {
+    background: var(--agent-error);
+  }
+
+  .status-success {
+    background: var(--agent-success);
+  }
+
+  .status-warning {
+    background: var(--agent-warning);
+  }
+
+  .status-error {
+    background: var(--agent-error);
+  }
+
+  .status-info {
+    background: var(--agent-info);
+  }
+
+  /* Text Colors */
+  .text-accent {
+    color: var(--agent-accent);
+  }
+
+  .text-primary {
+    color: var(--agent-text-primary);
+  }
+
+  .text-secondary {
+    color: var(--agent-text-secondary);
+  }
+
+  .text-tertiary {
+    color: var(--agent-text-tertiary);
+  }
+
+  .text-success {
+    color: var(--agent-success);
+  }
+
+  .text-warning {
+    color: var(--agent-warning);
+  }
+
+  .text-error {
+    color: var(--agent-error);
+  }
+
+  .text-info {
+    color: var(--agent-info);
+  }
+}
+
+/* ============================================================
+   Scrollbar Styling
+   ============================================================ */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* ============================================================
+   Animations
+   ============================================================ */
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes blink {
+  0%, 49% {
+    opacity: 1;
+  }
+  50%, 100% {
+    opacity: 0;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Animation Classes */
+.message-enter {
+  animation: fadeInUp 0.3s ease-out;
+}
+
+.fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
+.streaming-cursor::after {
+  content: '▌';
+  animation: blink 1s step-end infinite;
+  color: var(--agent-accent);
+}
+
+.pulse {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+/* ============================================================
+   Backward Compatibility (Deprecated)
+   Will be removed in v3.2
+   ============================================================ */
+
+/* Map old glassmorphism to new surface classes */
+.glass {
+  @apply surface-1;
+  backdrop-filter: blur(20px);
+}
+
+.glass-dark {
+  background: var(--agent-bg-secondary);
+  border-right: 1px solid var(--agent-border);
+  backdrop-filter: blur(20px);
+}
+
+.glass-strong {
+  @apply surface-2;
+  backdrop-filter: blur(30px);
+}
+
+/* ============================================================
+   Focus Styles (Accessibility)
+   ============================================================ */
+
+*:focus-visible {
+  outline: 2px solid var(--agent-accent);
+  outline-offset: 2px;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--agent-accent);
+  outline-offset: 2px;
+}
+
+/* ============================================================
+   Opacity Utilities (for persona backgrounds)
+   ============================================================ */
+
+.opacity-12 {
+  opacity: 0.12;
+}
+
+/* ============================================================
+   Selection Styling
+   ============================================================ */
+
+::selection {
+  background: var(--agent-accent);
+  color: #000;
+}
+
+::-moz-selection {
+  background: var(--agent-accent);
+  color: #000;
+}
+
+/* ============================================================
+   Chat UI - Friendly Messaging System
+   ============================================================ */
+
+/* User message bubble (right side, Telegram-style) */
+.chat-bubble-user {
+  border-radius: 20px 20px 4px 20px;
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--persona-primary) 15%, transparent),
+    color-mix(in srgb, var(--persona-secondary) 8%, transparent)
+  );
+  border: 1px solid color-mix(in srgb, var(--persona-primary) 20%, transparent);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+  padding: 12px 16px;
+}
+
+/* Assistant message bubble (left side, Telegram-style) */
+.chat-bubble-assistant {
+  border-radius: 20px 20px 20px 4px;
+  background: var(--agent-bg-secondary);
+  border: 1px solid color-mix(in srgb, var(--persona-primary) 15%, transparent);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1),
+              0 0 20px color-mix(in srgb, var(--persona-shadow) 30%, transparent);
+  padding: 12px 16px;
+}
+
+/* Error message bubble */
+.chat-bubble-error {
+  border-radius: 20px 20px 20px 4px;
+  background: color-mix(in srgb, var(--agent-error) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--agent-error) 25%, transparent);
+  padding: 12px 16px;
+}
+
+/* Chat input container pill */
+.chat-input-container {
+  border-radius: 24px;
+  background: var(--agent-bg-secondary);
+  border: 1px solid var(--agent-border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.chat-input-container:focus-within {
+  border-color: var(--persona-primary);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2),
+              0 0 8px var(--persona-shadow);
+}
+
+/* Avatar with persona glow ring */
+.persona-avatar-ring {
+  border: 2px solid var(--persona-primary);
+  box-shadow: 0 0 12px var(--persona-shadow);
+  border-radius: 9999px;
+}
+
+/* Large avatar for empty state */
+.persona-avatar-large {
+  border: 3px solid var(--persona-primary);
+  box-shadow: 0 0 24px var(--persona-shadow),
+              0 0 48px color-mix(in srgb, var(--persona-shadow) 30%, transparent);
+  border-radius: 9999px;
+  animation: avatarGlow 3s ease-in-out infinite;
+}
+
+@keyframes avatarGlow {
+  0%, 100% {
+    box-shadow: 0 0 24px var(--persona-shadow),
+                0 0 48px color-mix(in srgb, var(--persona-shadow) 30%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 32px var(--persona-shadow),
+                0 0 64px color-mix(in srgb, var(--persona-shadow) 40%, transparent);
+  }
+}
+
+/* Engine selector pill */
+.engine-selector {
+  border-radius: 20px;
+  padding: 6px 14px;
+  font-size: var(--text-xs);
+  background: var(--agent-bg-tertiary);
+  border: 1px solid var(--agent-border);
+  color: var(--agent-text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.engine-selector:hover {
+  border-color: var(--persona-primary);
+  color: var(--agent-text-primary);
+}
+
+/* Engine dropdown */
+.engine-dropdown {
+  border-radius: 12px;
+  background: var(--agent-bg-tertiary);
+  border: 1px solid var(--agent-border-strong);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.engine-dropdown-item {
+  padding: 8px 16px;
+  font-size: var(--text-sm);
+  color: var(--agent-text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.engine-dropdown-item:hover {
+  background: var(--agent-bg-secondary);
+  color: var(--agent-text-primary);
+}
+
+.engine-dropdown-item.active {
+  background: color-mix(in srgb, var(--persona-primary) 12%, transparent);
+  color: var(--persona-primary);
+}
+
+/* Plus menu popup (tools + attachments) */
+.plus-menu {
+  border-radius: 16px;
+  background: var(--agent-bg-tertiary);
+  border: 1px solid var(--agent-border-strong);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4),
+              0 0 12px rgba(0, 0, 0, 0.2);
+  padding: 12px;
+  animation: menuSlideUp 0.2s ease-out;
+}
+
+@keyframes menuSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.plus-menu-section-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--agent-text-tertiary);
+  padding: 4px 4px 8px;
+}
+
+.plus-menu-item {
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+  font-size: var(--text-xs);
+  color: var(--agent-text-secondary);
+  min-width: 72px;
+  text-align: center;
+}
+
+.plus-menu-item:hover {
+  background: var(--agent-bg-secondary);
+  border-color: var(--agent-border);
+  color: var(--agent-text-primary);
+}
+
+.plus-menu-item.active {
+  background: color-mix(in srgb, var(--persona-primary) 10%, transparent);
+  border-color: color-mix(in srgb, var(--persona-primary) 30%, transparent);
+  color: var(--persona-primary);
+}
+
+.plus-menu-divider {
+  height: 1px;
+  background: var(--agent-border);
+  margin: 8px 0;
+}
+
+/* Tool badge chip (shown in input when tool active) */
+.tool-badge {
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.tool-badge-web {
+  background: color-mix(in srgb, var(--agent-info) 12%, transparent);
+  color: var(--agent-info);
+  border: 1px solid color-mix(in srgb, var(--agent-info) 25%, transparent);
+}
+
+.tool-badge-lore {
+  background: color-mix(in srgb, var(--agent-working) 12%, transparent);
+  color: var(--agent-working);
+  border: 1px solid color-mix(in srgb, var(--agent-working) 25%, transparent);
+}
+
+/* Flash/Pro mode toggle */
+.mode-toggle {
+  border-radius: 16px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid var(--agent-border);
+  background: var(--agent-bg-tertiary);
+  color: var(--agent-text-secondary);
+}
+
+.mode-toggle:hover {
+  border-color: var(--agent-border-strong);
+}
+
+.mode-toggle-flash {
+  background: color-mix(in srgb, var(--agent-info) 10%, transparent);
+  border-color: color-mix(in srgb, var(--agent-info) 30%, transparent);
+  color: var(--agent-info);
+}
+
+.mode-toggle-pro {
+  background: color-mix(in srgb, var(--agent-working) 10%, transparent);
+  border-color: color-mix(in srgb, var(--agent-working) 30%, transparent);
+  color: var(--agent-working);
+}
+
+/* Send button with persona color */
+.chat-send-button {
+  width: 34px;
+  height: 34px;
+  border-radius: 9999px;
+  background: var(--persona-primary);
+  color: #000;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.chat-send-button:hover {
+  box-shadow: 0 0 12px var(--persona-shadow);
+  opacity: 0.9;
+}
+
+.chat-send-button:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* Plus button */
+.chat-plus-button {
+  width: 34px;
+  height: 34px;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--agent-text-secondary);
+  border: 1.5px solid var(--agent-border);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.chat-plus-button:hover {
+  border-color: var(--persona-primary);
+  color: var(--persona-primary);
+  background: color-mix(in srgb, var(--persona-primary) 8%, transparent);
+}
+
+/* Chat header */
+.chat-header {
+  padding: 12px 20px;
+  background: color-mix(in srgb, var(--agent-bg-secondary) 80%, transparent);
+  border-bottom: 1px solid var(--agent-border);
+  backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Scroll area with top fade */
+.chat-messages-area {
+  mask-image: linear-gradient(to bottom, transparent 0px, black 24px, black calc(100% - 24px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 24px, black calc(100% - 24px), transparent 100%);
+}
+
+/* Typing indicator */
+.typing-indicator {
+  display: flex;
+  gap: 4px;
+  padding: 12px 16px;
+}
+
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--persona-primary);
+  animation: typingBounce 1.4s ease-in-out infinite;
+}
+
+.typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typingBounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+}

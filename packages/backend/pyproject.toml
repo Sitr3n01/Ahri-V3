@@ -1,0 +1,51 @@
+[project]
+name = "ahri-backend"
+version = "0.1.0"
+description = "Ahri V3 - FastAPI Backend for AI Companion System"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+    "sqlalchemy>=2.0.36",
+    "aiosqlite>=0.20.0",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-dotenv>=1.0.1",
+    "google-generativeai>=0.8.0",
+    "openai>=1.58.0",
+    "chromadb>=0.5.0",
+    "sentence-transformers>=3.3.0",
+    "spotipy>=2.24.0",
+    "requests>=2.32.0",
+    "beautifulsoup4>=4.12.0",
+    "pillow>=11.0.0",
+    "pyyaml>=6.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "httpx>=0.28.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

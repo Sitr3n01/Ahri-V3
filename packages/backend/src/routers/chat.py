@@ -1,0 +1,447 @@
+"""
+Chat: envio de mensagens e streaming via WebSocket.
+"""
+import asyncio
+import base64
+import logging
+import os
+import tempfile
+import threading
+import time
+from datetime import datetime
+from typing import Optional
+
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
+from jose import JWTError, jwt
+import google.generativeai as genai
+
+from src.config import get_settings
+from src.dependencies import AuthDep, DbDep, SettingsDep
+from src.models.schemas import ChatRequest, ChatResponse, ChatMessageSchema, AgentTaskSchema, FileAttachment
+from src.services.llm_service import get_llm_service
+from src.services.memory_service import MemoryService
+from src.services.session_service import SessionService
+from src.services.persona_service import get_active_persona
+from src.services.spotify_service import get_spotify_service
+from src.core.prompt_builder import build_system_prompt
+from src.core.save_tag_parser import extract_save_tags, extract_agent_tags, clean_all_tags
+from src.core.memory_analyzer import analyze_incremental
+from src.services.vector_service import get_vector_service
+from src.services.agent_service import get_permission_level, execute_task as execute_agent_task
+
+logger = logging.getLogger("ahri.router.chat")
+
+router = APIRouter()
+
+
+def _upload_file_to_gemini(file_data_b64: str, mime_type: str, filename: str = "temp_file", api_key: str = ""):
+    """Upload file to Gemini File API (usado para video e PDF)."""
+    try:
+        logger.info(f"Uploading file: {filename} ({mime_type})")
+        suffix = "." + mime_type.split("/")[-1]
+
+        # Salva temporariamente
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(base64.b64decode(file_data_b64))
+            tmp_path = tmp.name
+
+        # Upload via Gemini File API
+        if api_key:
+            genai.configure(api_key=api_key)
+
+        uploaded_file = genai.upload_file(tmp_path, mime_type=mime_type)
+        os.remove(tmp_path)
+
+        # Aguarda processamento
+        while uploaded_file.state.name == "PROCESSING":
+            time.sleep(1)
+            uploaded_file = genai.get_file(uploaded_file.name)
+
+        if uploaded_file.state.name == "FAILED":
+            logger.error(f"File upload failed: {uploaded_file.name}")
+            return None
+
+        logger.info(f"File uploaded successfully: {uploaded_file.name}")
+        return uploaded_file
+
+    except Exception as e:
+        logger.error(f"FILE API ERROR: {e}")
+        return None
+
+
+async def _build_context(db, persona_name: str, model: str) -> tuple[str, list[dict]]:
+    """Constrói system prompt e carrega contexto."""
+    mem_svc = MemoryService(db)
+
+    # Carrega dados em paralelo
+    profile = await mem_svc.get_profile()
+    social_graph = await mem_svc.get_social_graph()
+
+    # Spotify context (síncrono)
+    spotify_text = ""
+    try:
+        spotify_svc = get_spotify_service()
+        spotify_text = spotify_svc.get_listening_context_text()
+    except Exception:
+        pass
+
+    is_local = model == "LOCAL"
+
+    system_prompt = build_system_prompt(
+        user_profile=profile,
+        persona_name=persona_name,
+        is_local_mode=is_local,
+        spotify_context=spotify_text,
+        social_graph=social_graph,
+        model_name=model,
+        enable_agent=True,
+    )
+
+    return system_prompt, profile
+
+
+def _process_save_tags(full_response: str, persona_name: str) -> list[str]:
+    """Processa [[SAVE:]] tags e salva no RAG."""
+    notifications = []
+    tags = extract_save_tags(full_response)
+
+    if tags:
+        try:
+            vector_svc = get_vector_service(persona_name)
+            for tag in tags:
+                vector_svc.add_dynamic_memory(tag.title, tag.content)
+                notifications.append(f"Memória salva: {tag.title}")
+                logger.info(f"Memory saved: {tag.title}")
+        except Exception as e:
+            logger.error(f"Save tag processing error: {e}")
+
+    return notifications
+
+
+def _process_agent_tags(full_response: str) -> list[AgentTaskSchema]:
+    """Processa [[AGENT:]] tags e executa/enfileira tasks."""
+    tasks = []
+    tags = extract_agent_tags(full_response)
+
+    for tag in tags:
+        perm = get_permission_level(tag.capability)
+
+        if perm.value == "SAFE":
+            # Executa automaticamente
+            result = execute_agent_task(tag.capability, tag.parameters)
+            tasks.append(AgentTaskSchema(
+                capability=tag.capability,
+                parameters=tag.parameters,
+                permission_level=perm,
+                status="completed" if not result.get("error") else "failed",
+                result=result.get("result", ""),
+                error=result.get("error", ""),
+            ))
+        else:
+            # Requer aprovação
+            tasks.append(AgentTaskSchema(
+                capability=tag.capability,
+                parameters=tag.parameters,
+                permission_level=perm,
+                status="pending",
+            ))
+
+    return tasks
+
+
+def _run_memory_analysis_bg(user_msg: str, ai_msg: str, profile: dict):
+    """Executa análise incremental de memória em background thread."""
+    try:
+        result = analyze_incremental(user_msg, ai_msg, profile)
+        if result and result.get("action") != "IGNORE":
+            logger.info(f"Memory update detected: {result.get('action')}")
+    except Exception as e:
+        logger.error(f"Background memory analysis error: {e}")
+
+
+@router.post("", response_model=ChatResponse)
+async def send_message(
+    request: ChatRequest,
+    auth: AuthDep,
+    db: DbDep,
+    settings: SettingsDep,
+):
+    """Envia uma mensagem e recebe resposta (não-streaming)."""
+    persona_name = get_active_persona()
+    session_svc = SessionService(db)
+
+    # 1. Configura o modelo LLM
+    llm_svc = get_llm_service()
+    llm_svc.set_mode(request.model)
+
+    # 2. Constrói system prompt com contexto completo
+    system_prompt, profile = await _build_context(db, persona_name, request.model)
+
+    # 3. Busca/cria sessão ativa
+    sessions = await session_svc.list_sessions(persona_name)
+    if sessions:
+        session_id = sessions[0]["id"]
+        session_data = await session_svc.get_session(session_id)
+        history = session_data["messages"] if session_data else []
+    else:
+        new_session = await session_svc.create_session(persona_name=persona_name)
+        session_id = new_session["id"]
+        history = []
+
+    # 4. Salva mensagem do usuário
+    await session_svc.add_message(
+        session_id=session_id,
+        role="user",
+        content=request.message,
+        images=request.images,
+    )
+
+    # 5. Upload de arquivos para Gemini File API (video, PDFs)
+    uploaded_files = []
+    api_key = settings.gemini_fallback_key or settings.gemini_primary_key
+
+    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB limit for base64 uploads
+
+    if request.video:
+        if len(request.video.data) > MAX_FILE_SIZE * 1.37: # Approx base64 size
+             logger.error("Video file too large")
+             # Continue without video or raise? Let's skip to avoid crash
+        else:
+            vid_file = _upload_file_to_gemini(
+                request.video.data, "video/mp4", request.video.name, api_key
+            )
+            if vid_file:
+                uploaded_files.append(vid_file)
+
+    if request.pdfs:
+        for pdf in request.pdfs:
+            if len(pdf.data) > MAX_FILE_SIZE * 1.37:
+                 logger.error(f"PDF too large: {pdf.name}")
+                 continue
+            pdf_file = _upload_file_to_gemini(
+                pdf.data, "application/pdf", pdf.name, api_key
+            )
+            if pdf_file:
+                uploaded_files.append(pdf_file)
+
+    # 6. Gera resposta (coleta streaming em string completa)
+    full_response = ""
+    try:
+        for chunk in llm_svc.generate_response(
+            message=request.message,
+            system_prompt=system_prompt,
+            history=history,
+            images=request.images if request.images else None,
+            video=None, # Video handled via uploaded_files
+            pdfs=None,  # PDFs handled via uploaded_files
+            uploaded_files=uploaded_files if uploaded_files else None,
+        ):
+            full_response += chunk
+    except Exception as e:
+        logger.error(f"LLM generation error: {e}")
+        full_response = f"[Error] Falha na geração: {e}"
+
+    # 7. Processa tags (offloaded to avoid blocking)
+    loop = asyncio.get_running_loop()
+    notifications = await loop.run_in_executor(None, _process_save_tags, full_response, persona_name)
+
+    # 8. Processa [[AGENT:]] tags (assume fast enough or internal async, but keeping sync for now as it calls agent_service)
+    agent_tasks = _process_agent_tags(full_response)
+
+
+    # 8. Limpa tags do texto de display
+    clean_response = clean_all_tags(full_response)
+
+    # 9. Salva resposta da IA na sessão
+    await session_svc.add_message(
+        session_id=session_id,
+        role="assistant",
+        content=clean_response,
+        meta={"model": request.model},
+    )
+
+    # 10. Trigger memory analyzer em background
+    threading.Thread(
+        target=_run_memory_analysis_bg,
+        args=(request.message, clean_response, profile),
+        daemon=True,
+    ).start()
+
+    return ChatResponse(
+        message=ChatMessageSchema(
+            role="assistant",
+            content=clean_response,
+            timestamp=datetime.now().strftime("%H:%M:%S"),
+            meta={"model": request.model},
+        ),
+        agent_tasks=agent_tasks,
+        memory_notifications=notifications,
+    )
+
+
+@router.websocket("/ws")
+async def chat_websocket(websocket: WebSocket):
+    """WebSocket para streaming de chat."""
+    await websocket.accept()
+
+    settings = get_settings()
+    authenticated = False
+
+    try:
+        while True:
+            data = await websocket.receive_json()
+            msg_type = data.get("type", "message")
+
+            # Autenticação no primeiro message
+            if msg_type == "auth":
+                token = data.get("token", "")
+                try:
+                    payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+                    if payload.get("type") == "access":
+                        authenticated = True
+                        await websocket.send_json({"type": "auth", "status": "ok"})
+                    else:
+                        await websocket.send_json({"type": "auth", "status": "error", "detail": "Invalid token type"})
+                except JWTError:
+                    await websocket.send_json({"type": "auth", "status": "error", "detail": "Invalid token"})
+                continue
+
+            if not authenticated:
+                await websocket.send_json({"type": "error", "detail": "Not authenticated. Send auth message first."})
+                continue
+
+            if msg_type == "message":
+                message = data.get("message", "")
+                model = data.get("model", "PRO")
+                images = data.get("images", [])
+                video = data.get("video")
+                pdfs = data.get("pdfs", [])
+
+                if not message:
+                    await websocket.send_json({"type": "error", "detail": "Empty message"})
+                    continue
+
+                persona_name = get_active_persona()
+                llm_svc = get_llm_service()
+                llm_svc.set_mode(model)
+
+                # Obtem db session via import direto
+                from src.models.database import get_db
+                async for db in get_db():
+                    system_prompt, profile = await _build_context(db, persona_name, model)
+
+                    session_svc = SessionService(db)
+                    sessions = await session_svc.list_sessions(persona_name)
+                    if sessions:
+                        session_id = sessions[0]["id"]
+                        session_data = await session_svc.get_session(session_id)
+                        history = session_data["messages"] if session_data else []
+                    else:
+                        new_session = await session_svc.create_session(persona_name=persona_name)
+                        session_id = new_session["id"]
+                        history = []
+
+                    # Salva mensagem do usuário
+                    await session_svc.add_message(
+                        session_id=session_id,
+                        role="user",
+                        content=message,
+                        images=images,
+                    )
+
+                    # Upload arquivos para Gemini File API
+                    uploaded_files = []
+                    api_key = settings.gemini_fallback_key or settings.gemini_primary_key
+
+                    if video:
+                        vid_file = _upload_file_to_gemini(
+                            video["data"], "video/mp4", video.get("name", "video.mp4"), api_key
+                        )
+                        if vid_file:
+                            uploaded_files.append(vid_file)
+
+                    if pdfs:
+                        for pdf in pdfs:
+                            pdf_file = _upload_file_to_gemini(
+                                pdf["data"], "application/pdf", pdf.get("name", "document.pdf"), api_key
+                            )
+                            if pdf_file:
+                                uploaded_files.append(pdf_file)
+
+                    # Stream resposta
+                    full_response = ""
+
+                    def _generate():
+                        nonlocal full_response
+                        for chunk in llm_svc.generate_response(
+                            message=message,
+                            system_prompt=system_prompt,
+                            history=history,
+                            images=images if images else None,
+                            video=video,
+                            pdfs=pdfs,
+                            uploaded_files=uploaded_files if uploaded_files else None,
+                        ):
+                            full_response += chunk
+                            yield chunk
+
+                    # LLM streaming é síncrono - roda em thread
+                    loop = asyncio.get_event_loop()
+
+                    def _stream_sync():
+                        nonlocal full_response
+                        for chunk in llm_svc.generate_response(
+                            message=message,
+                            system_prompt=system_prompt,
+                            history=history,
+                            images=images if images else None,
+                        ):
+                            full_response += chunk
+                            # Usa thread-safe callback
+                            asyncio.run_coroutine_threadsafe(
+                                websocket.send_json({"type": "chunk", "content": chunk, "done": False}),
+                                loop,
+                            )
+
+                    await loop.run_in_executor(None, _stream_sync)
+
+                    # Processa tags (offloaded)
+                    notifications = await loop.run_in_executor(None, _process_save_tags, full_response, persona_name)
+                    agent_tasks = _process_agent_tags(full_response)
+                    clean_response = clean_all_tags(full_response)
+
+
+                    # Salva resposta
+                    await session_svc.add_message(
+                        session_id=session_id,
+                        role="assistant",
+                        content=clean_response,
+                        meta={"model": model},
+                    )
+
+                    # Envia done
+                    await websocket.send_json({
+                        "type": "done",
+                        "content": clean_response,
+                        "agent_tasks": [t.model_dump() for t in agent_tasks],
+                        "memory_notifications": notifications,
+                    })
+
+                    # Background memory analysis
+                    threading.Thread(
+                        target=_run_memory_analysis_bg,
+                        args=(message, clean_response, profile),
+                        daemon=True,
+                    ).start()
+
+                    break  # Só precisamos de uma sessão db
+
+    except WebSocketDisconnect:
+        logger.info("WebSocket client disconnected")
+    except Exception as e:
+        logger.exception(f"WebSocket error: {e}")
+        try:
+            await websocket.send_json({"type": "error", "detail": str(e)})
+        except Exception:
+            pass
+

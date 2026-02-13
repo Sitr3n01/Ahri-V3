@@ -1,0 +1,25 @@
+{
+  "name": "ahri-v3",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev --filter=@ahri/desktop",
+    "dev:backend": "cd packages/backend && uvicorn src.main:app --reload --port 8742",
+    "dev:desktop": "turbo run dev --filter=@ahri/desktop",
+    "dev:web": "turbo run dev --filter=@ahri/web",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "type-check": "turbo run type-check"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.0",
+    "typescript": "^5.7.0"
+  },
+  "packageManager": "npm@10.9.0",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

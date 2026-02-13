@@ -1,0 +1,2 @@
+# Atualização: 2025-12-31 22:42
+Mem é a manifestação primal da emoção pura de Cyrene, ligada à Philia093 (sua origem humana no Ciclo 0). Representa a inocência perdida e a conexão visceral com o passado.

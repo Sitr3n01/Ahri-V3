@@ -1,0 +1,237 @@
+"""
+Vector Memory Service - Wrapper do VectorMemory (vector_brain.py).
+Gerencia ChromaDB para RAG com dual-source architecture.
+"""
+import os
+import re
+import json
+import glob
+import logging
+from datetime import datetime
+from pathlib import Path
+
+import chromadb
+from chromadb.utils import embedding_functions
+
+from src.config import get_settings
+
+logger = logging.getLogger("ahri.vector")
+
+
+class VectorService:
+    """Serviço de memória vetorial por persona."""
+
+    def __init__(self, persona_name: str):
+        self.persona_name = persona_name.lower().replace(" ", "_")
+        settings = get_settings()
+
+        # Diretórios da persona
+        self.persona_dir = settings.personas_dir / self.persona_name
+        self.rag_docs_dir = self.persona_dir / "rag_docs"
+        self.knowledge_dir = self.persona_dir / "knowledge"
+        self.history_dir = self.persona_dir / "history"
+
+        for d in [self.rag_docs_dir, self.knowledge_dir, self.history_dir]:
+            d.mkdir(parents=True, exist_ok=True)
+
+        # ChromaDB
+        self.client = chromadb.PersistentClient(path=str(settings.vector_db_path))
+        self.embed_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name="all-MiniLM-L6-v2"
+        )
+        self.collection = self.client.get_or_create_collection(
+            name=f"memory_{self.persona_name}",
+            embedding_function=self.embed_fn,
+        )
+
+    def _chunk_text(self, text: str, chunk_size: int = 1000, overlap: int = 100) -> list[str]:
+        text = re.sub(r"\s+", " ", text).strip()
+        chunks = []
+        start = 0
+        while start < len(text):
+            end = start + chunk_size
+            chunks.append(text[start:end])
+            start += chunk_size - overlap
+        return chunks
+
+    def ingest_knowledge_base(self) -> int:
+        """Processa rag_docs (estático) e knowledge (dinâmico). Retorna total de chunks."""
+        tracker_file = self.persona_dir / "rag_tracker.json"
+        processed_files: dict = {}
+
+        if tracker_file.exists():
+            try:
+                processed_files = json.loads(tracker_file.read_text())
+            except Exception as e:
+                logger.warning(f"Failed to read rag_tracker.json: {e}")
+
+
+        total_count = 0
+        new_state = processed_files.copy()
+
+        sources = [
+            (self.rag_docs_dir, "static_lore"),
+            (self.knowledge_dir, "dynamic_knowledge"),
+        ]
+
+        for dir_path, source_type in sources:
+            if not dir_path.exists():
+                continue
+
+            for file_path in dir_path.glob("*.*"):
+                if file_path.suffix not in (".txt", ".md"):
+                    continue
+
+                filename = file_path.name
+                tracker_key = f"{source_type}/{filename}"
+                current_mtime = file_path.stat().st_mtime
+
+                if tracker_key in processed_files and processed_files[tracker_key] == current_mtime:
+                    continue
+
+                logger.info(f"[RAG] Ingesting ({source_type}): {filename}")
+
+                try:
+                    content = file_path.read_text(encoding="utf-8")
+
+                    # Remove versão antiga
+                    try:
+                        self.collection.delete(where={"filename": filename, "type": source_type})
+                    except Exception as e:
+                        logger.warning(f"Failed to delete old version of {filename}: {e}")
+
+
+                    chunks = self._chunk_text(content)
+                    ids, docs, metadatas = [], [], []
+
+                    for i, chunk in enumerate(chunks):
+                        chunk_id = f"{source_type}_{filename}_{i}_{int(current_mtime)}"
+                        ids.append(chunk_id)
+                        docs.append(chunk)
+                        metadatas.append({
+                            "source": "knowledge_base",
+                            "filename": filename,
+                            "type": source_type,
+                            "chunk_index": i,
+                            "last_modified": current_mtime,
+                        })
+                        total_count += 1
+
+                    if ids:
+                        self.collection.add(ids=ids, documents=docs, metadatas=metadatas)
+                        new_state[tracker_key] = current_mtime
+
+                except Exception as e:
+                    logger.error(f"[RAG] Error ingesting {filename}: {e}")
+
+        try:
+            tracker_file.write_text(json.dumps(new_state))
+        except Exception as e:
+            logger.error(f"Failed to write rag_tracker.json: {e}")
+
+
+        return total_count
+
+    def ingest_history(self) -> int:
+        """Ingere histórico de chat no vetor DB."""
+        if not self.history_dir.exists():
+            return 0
+
+        count = 0
+        try:
+            existing_ids = set(self.collection.get()["ids"])
+        except Exception as e:
+            logger.warning(f"Failed to get existing IDs from Chroma: {e}")
+            existing_ids = set()
+
+
+        for file_path in self.history_dir.glob("*.json"):
+            try:
+                data = json.loads(file_path.read_text(encoding="utf-8"))
+                filename = file_path.name
+
+                for idx, msg in enumerate(data):
+                    role = msg.get("role")
+                    content = msg.get("content")
+                    if role not in ("user", "assistant", "model") or not content:
+                        continue
+
+                    unique_id = f"{filename}_{idx}"
+                    if unique_id in existing_ids:
+                        continue
+
+                    meta = {
+                        "source": filename,
+                        "role": role,
+                        "timestamp": msg.get("timestamp", "unknown"),
+                        "type": "chat_history",
+                    }
+                    self.collection.add(documents=[content], metadatas=[meta], ids=[unique_id])
+                    count += 1
+            except Exception as e:
+                logger.error(f"Error processing history file {file_path.name}: {e}")
+
+
+        return count
+
+    def add_dynamic_memory(self, title: str, content: str) -> str:
+        """Escrita ativa da IA: cria arquivo em knowledge/ e re-indexa."""
+        safe_title = re.sub(r"[^a-zA-Z0-9_-]", "_", title)
+        filename = f"{safe_title}.md"
+        file_path = self.knowledge_dir / filename
+
+        mode = "a" if file_path.exists() else "w"
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+        with open(file_path, mode, encoding="utf-8") as f:
+            if mode == "a":
+                f.write("\n\n---\n\n")
+            f.write(f"# Update: {timestamp}\n{content}")
+
+        logger.info(f"[RAG WRITE] Memory saved: {filename}")
+        self.ingest_knowledge_base()
+        return filename
+
+    def search_memory(self, query: str, n_results: int = 4, threshold: float = 1.25) -> str:
+        """Busca semântica na memória. Retorna texto formatado com labels."""
+        try:
+            results = self.collection.query(
+                query_texts=[query],
+                n_results=n_results,
+                include=["documents", "metadatas", "distances"],
+            )
+
+            memories = []
+            if results["documents"]:
+                for i, doc in enumerate(results["documents"][0]):
+                    dist = results["distances"][0][i]
+                    if dist > threshold:
+                        continue
+
+                    meta = results["metadatas"][0][i]
+                    m_type = meta.get("type", "unknown")
+
+                    if m_type == "static_lore":
+                        memories.append(f"[BASE DE DADOS (FIXO)]: {doc}")
+                    elif m_type == "dynamic_knowledge":
+                        memories.append(f"[SUAS NOTAS (APRENDIZADO)]: {doc}")
+                    else:
+                        role = meta.get("role", "unknown")
+                        memories.append(f"[MEMORIA DE CHAT - {role.upper()}]: {doc}")
+
+            return "\n".join(memories)
+        except Exception as e:
+            logger.error(f"[RAG Search] Error: {e}")
+            return ""
+
+
+# Cache de instâncias por persona
+_vector_instances: dict[str, VectorService] = {}
+
+
+def get_vector_service(persona_name: str) -> VectorService:
+    """Retorna (ou cria) uma instância de VectorService para a persona."""
+    key = persona_name.lower().replace(" ", "_")
+    if key not in _vector_instances:
+        _vector_instances[key] = VectorService(key)
+    return _vector_instances[key]
