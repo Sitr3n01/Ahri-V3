@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { ApiError } from '@ahri/shared';
 import { api } from '@/api/client';
 import { persistTokens, restoreTokens, clearTokens } from '@/api/client';
 
@@ -25,10 +26,20 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ isAuthenticated: true, isLoading: false });
       return true;
     } catch (e) {
+      let errorMsg = 'Erro desconhecido';
+      if (e instanceof ApiError) {
+        errorMsg = e.status === 401
+          ? 'Senha incorreta'
+          : `Erro ${e.status}: ${e.message}`;
+      } else if (e instanceof TypeError) {
+        errorMsg = 'Falha ao conectar com o servidor (porta 8742)';
+      } else if (e instanceof Error) {
+        errorMsg = e.message;
+      }
       set({
         isAuthenticated: false,
         isLoading: false,
-        error: 'Senha incorreta',
+        error: errorMsg,
       });
       return false;
     }

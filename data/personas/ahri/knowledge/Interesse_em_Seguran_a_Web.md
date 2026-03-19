@@ -1,0 +1,2 @@
+# Atualização: 2026-01-08 14:41
+O usuário demonstra curiosidade técnica em vulnerabilidades web (XSS). Decidi canalizar isso para desafios educativos em JavaScript seguro e Hiragana, para transformar a energia inquisitiva em aprendizado produtivo.

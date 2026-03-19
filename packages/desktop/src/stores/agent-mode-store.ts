@@ -12,12 +12,20 @@ import { create } from 'zustand';
 import type { AgentExecution, AgentWorkerTask } from '@ahri/shared';
 import { api } from '../api/client';
 
+interface TPMStatus {
+  tokensUsed: number;
+  tokensRemaining: number;
+  limitTPM: number;
+  utilizationPercent: number;
+}
+
 interface AgentModeState {
   // State
   executions: AgentExecution[];
   activeExecution: AgentExecution | null;
   workerTasks: Map<number, AgentWorkerTask[]>;  // execution_id → tasks
   isLoading: boolean;
+  tpmStatus: TPMStatus;
 
   // Actions
   executeTask: (goal: string, orchestrator?: string) => Promise<void>;
@@ -25,6 +33,7 @@ interface AgentModeState {
   loadWorkerTasks: (executionId: number) => Promise<void>;
   clearHistory: () => void;
   setActiveExecution: (execution: AgentExecution | null) => void;
+  setTPMStatus: (status: TPMStatus) => void;
 
   // WebSocket updates (Phase 3)
   updateExecution: (execution: AgentExecution) => void;
@@ -41,6 +50,7 @@ export const useAgentModeStore = create<AgentModeState>((set, get) => ({
   activeExecution: null,
   workerTasks: new Map(),
   isLoading: false,
+  tpmStatus: { tokensUsed: 0, tokensRemaining: 15000, limitTPM: 15000, utilizationPercent: 0 },
 
   // Execute new task
   executeTask: async (goal: string, orchestrator = 'PRO') => {
@@ -113,6 +123,11 @@ export const useAgentModeStore = create<AgentModeState>((set, get) => ({
     } catch (error) {
       console.error('[AgentMode] Worker tasks load failed:', error);
     }
+  },
+
+  // Update TPM status (from WebSocket)
+  setTPMStatus: (status: TPMStatus) => {
+    set({ tpmStatus: status });
   },
 
   // Clear execution history

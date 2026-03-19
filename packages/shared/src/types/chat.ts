@@ -21,7 +21,7 @@ export interface ChatRequest {
   video?: FileAttachment;
   pdfs?: FileAttachment[];
   mode: 'default' | 'web_search' | 'lore_search';
-  model: 'PRO' | 'GOOGLE' | 'DEEPSEEK' | 'LOCAL';
+  model: string;
 }
 
 export interface ChatResponse {

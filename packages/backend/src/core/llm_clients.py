@@ -17,17 +17,29 @@ logger = logging.getLogger("ahri.llm")
 
 
 class GeminiClient:
-    """Cliente Gemini que NAO usa genai.configure() global.
+    """Cliente Gemini que suporta API key OU OAuth credentials.
     Cria instancias por request para thread-safety."""
 
-    def __init__(self, api_key: str, model_name: str):
+    def __init__(self, api_key: str = "", model_name: str = "", credentials=None):
         self.api_key = api_key
-        self._masked_key = f"{api_key[:8]}...{api_key[-4:]}" if len(api_key) > 12 else "***"
+        self.credentials = credentials
+        self._masked_key = f"{api_key[:8]}...{api_key[-4:]}" if api_key and len(api_key) > 12 else "***"
         self.model_name = model_name
 
+    def _configure(self):
+        """Configura genai com credentials ou API key."""
+        if self.credentials:
+            # Auto-refresh se expirado
+            if self.credentials.expired and self.credentials.refresh_token:
+                import google.auth.transport.requests
+                self.credentials.refresh(google.auth.transport.requests.Request())
+            genai.configure(credentials=self.credentials)
+        else:
+            genai.configure(api_key=self.api_key)
+
     def create_model(self, system_instruction: Optional[str] = None) -> genai.GenerativeModel:
-        """Cria um GenerativeModel com API key explicita."""
-        genai.configure(api_key=self.api_key)
+        """Cria um GenerativeModel com API key ou OAuth credentials."""
+        self._configure()
 
         is_gemma = "gemma" in self.model_name.lower()
         sys_inst = None if is_gemma else system_instruction
@@ -59,15 +71,28 @@ class GeminiClient:
     def generate_content_rest(self, prompt: str, temperature: float = 0.2) -> Optional[str]:
         """Gera conteudo via REST API (sem usar SDK global). Thread-safe."""
         full_model = self.model_name if self.model_name.startswith("models/") else f"models/{self.model_name}"
-        url = f"https://generativelanguage.googleapis.com/v1beta/{full_model}:generateContent?key={self.api_key}"
+        base_url = f"https://generativelanguage.googleapis.com/v1beta/{full_model}:generateContent"
 
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": temperature},
         }
 
+        headers = {"Content-Type": "application/json"}
+
+        if self.credentials:
+            # OAuth: usa Bearer token
+            if self.credentials.expired and self.credentials.refresh_token:
+                import google.auth.transport.requests
+                self.credentials.refresh(google.auth.transport.requests.Request())
+            headers["Authorization"] = f"Bearer {self.credentials.token}"
+            url = base_url
+        else:
+            # API key: query param
+            url = f"{base_url}?key={self.api_key}"
+
         try:
-            response = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=30)
+            response = requests.post(url, headers=headers, json=payload, timeout=30)
             response.raise_for_status()
             data = response.json()
 

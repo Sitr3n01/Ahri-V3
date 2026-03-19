@@ -9,6 +9,7 @@ import type { ChatRequest, ChatResponse, SessionSummary, SessionDetail } from '.
 import type { AgentTask } from '../types/agent.js';
 import type { AgentExecution, AgentWorkerTask, AgentModeExecuteRequest } from '../types/agent-mode.js';
 import type { UserProfile, SpotifyContext } from '../types/memory.js';
+import type { AvailableModel, OAuthStatus } from '../types/llm.js';
 
 export interface AhriClientConfig {
   baseUrl: string;
@@ -142,6 +143,28 @@ export class AhriApiClient {
   }
 
   // =========================================================================
+  // Password Reset
+  // =========================================================================
+
+  async resetPassword(currentPassword: string, newPassword: string): Promise<TokenResponse> {
+    const data = await this.request<TokenResponse>('POST', '/auth/reset-password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    });
+    this.accessToken = data.access_token;
+    this.refreshToken = data.refresh_token;
+    return data;
+  }
+
+  async forceResetPassword(newPassword: string): Promise<{ status: string; message: string }> {
+    return this.request<{ status: string; message: string }>(
+      'POST', '/auth/force-reset',
+      { new_password: newPassword },
+      false, // No auth required
+    );
+  }
+
+  // =========================================================================
   // Health
   // =========================================================================
 
@@ -163,6 +186,10 @@ export class AhriApiClient {
 
   async activatePersona(name: string): Promise<{ active: string }> {
     return this.request<{ active: string }>('POST', `/personas/${encodeURIComponent(name)}/activate`);
+  }
+
+  async updatePersona(name: string, data: Record<string, any>): Promise<PersonaDetail> {
+    return this.request<PersonaDetail>('PUT', `/personas/${encodeURIComponent(name)}`, data);
   }
 
   // =========================================================================
@@ -204,6 +231,10 @@ export class AhriApiClient {
 
   async getProfile(): Promise<UserProfile> {
     return this.request<UserProfile>('GET', '/memory/profile');
+  }
+
+  async saveProfile(profile: UserProfile): Promise<{ status: string; profile: UserProfile }> {
+    return this.request<{ status: string; profile: UserProfile }>('POST', '/memory/profile', profile);
   }
 
   async saveMemory(title: string, content: string): Promise<void> {
@@ -271,6 +302,42 @@ export class AhriApiClient {
 
   async getAgentModeWorkers(executionId: number): Promise<AgentWorkerTask[]> {
     return this.request<AgentWorkerTask[]>('GET', `/agent-mode/${executionId}/workers`);
+  }
+
+  // =========================================================================
+  // Settings
+  // =========================================================================
+
+  async getSettings(): Promise<any> {
+    return this.request<any>('GET', '/settings');
+  }
+
+  async updateSettings(settings: Record<string, any>): Promise<{ status: string }> {
+    return this.request<{ status: string }>('POST', '/settings', { settings });
+  }
+
+  // =========================================================================
+  // Google OAuth
+  // =========================================================================
+
+  async getOAuthStatus(): Promise<OAuthStatus> {
+    return this.request<OAuthStatus>('GET', '/oauth/google/status');
+  }
+
+  async initiateGoogleOAuth(): Promise<{ auth_url: string; state: string }> {
+    return this.request<{ auth_url: string; state: string }>('GET', '/oauth/google/authorize');
+  }
+
+  async disconnectGoogleOAuth(): Promise<{ status: string }> {
+    return this.request<{ status: string }>('POST', '/oauth/google/disconnect');
+  }
+
+  // =========================================================================
+  // Models
+  // =========================================================================
+
+  async getAvailableModels(): Promise<AvailableModel[]> {
+    return this.request<AvailableModel[]>('GET', '/settings/models/available');
   }
 
   // =========================================================================

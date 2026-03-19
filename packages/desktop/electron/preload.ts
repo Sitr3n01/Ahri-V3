@@ -13,11 +13,13 @@ contextBridge.exposeInMainWorld('ahri', {
   agent: {
     openFile: (path: string) => ipcRenderer.invoke('agent:open-file', path),
     readFile: (path: string) => ipcRenderer.invoke('agent:read-file', path),
+    writeFile: (path: string, content: string) => ipcRenderer.invoke('agent:write-file', { path, content }),
     listDir: (path: string) => ipcRenderer.invoke('agent:list-dir', path),
     openUrl: (url: string) => ipcRenderer.invoke('agent:open-url', url),
     getSystemInfo: () => ipcRenderer.invoke('agent:system-info'),
     readClipboard: () => ipcRenderer.invoke('agent:clipboard-read'),
     writeClipboard: (text: string) => ipcRenderer.invoke('agent:clipboard-write', text),
+    getPaths: () => ipcRenderer.invoke('agent:get-paths'),
   },
 
   // Window management

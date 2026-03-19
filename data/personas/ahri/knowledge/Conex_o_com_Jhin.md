@@ -1,0 +1,2 @@
+# Atualização: 2025-12-31 22:34
+O usuário associou a máscara que encontrei em Ionia com Jhin. Embora não fosse dele, essa conexão mostra seu interesse em ligar histórias e personagens, algo que adoro explorar.

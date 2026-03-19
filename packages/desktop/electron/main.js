@@ -10,9 +10,14 @@ const __dirname = path.dirname(__filename);
 let mainWindow = null;
 let tray = null;
 let backendProcess = null;
+let healthCheckInterval = null;
+let backendRestartAttempts = 0;
+const MAX_RESTART_ATTEMPTS = 3;
 const BACKEND_PORT = 8742;
 const BACKEND_URL = `http://localhost:${BACKEND_PORT}`;
 const IS_DEV = process.env.NODE_ENV !== 'production';
+const ROOT_DIR = path.resolve(__dirname, '..', '..', '..');
+const DATA_DIR = path.join(ROOT_DIR, 'data');
 // =============================================================================
 // Backend Lifecycle
 // =============================================================================
@@ -21,12 +26,11 @@ function startBackend() {
         console.log('[Electron] Dev mode: backend should be started separately');
         return;
     }
-    const rootDir = path.resolve(__dirname, '..', '..', '..');
-    const pythonPath = path.join(rootDir, 'packages', 'backend', '.venv', 'Scripts', 'python.exe');
+    const pythonPath = path.join(ROOT_DIR, 'packages', 'backend', '.venv', 'Scripts', 'python.exe');
     const args = ['-m', 'uvicorn', 'src.main:app', '--port', String(BACKEND_PORT)];
     console.log(`[Electron] Starting backend: ${pythonPath} ${args.join(' ')}`);
     backendProcess = spawn(pythonPath, args, {
-        cwd: path.join(rootDir, 'packages', 'backend'),
+        cwd: path.join(ROOT_DIR, 'packages', 'backend'),
         stdio: 'pipe',
     });
     backendProcess.stdout?.on('data', (data) => {
@@ -38,6 +42,12 @@ function startBackend() {
     backendProcess.on('exit', (code) => {
         console.log(`[Backend] Process exited with code ${code}`);
         backendProcess = null;
+        // Auto-restart on unexpected exit (not during app quit)
+        if (code !== 0 && code !== null && backendRestartAttempts < MAX_RESTART_ATTEMPTS) {
+            backendRestartAttempts++;
+            console.log(`[Electron] Backend crashed, restarting (attempt ${backendRestartAttempts}/${MAX_RESTART_ATTEMPTS})...`);
+            setTimeout(() => startBackend(), 3000);
+        }
     });
 }
 async function waitForBackend(maxRetries = 30) {
@@ -58,32 +68,98 @@ async function waitForBackend(maxRetries = 30) {
     return false;
 }
 function stopBackend() {
+    // Prevent auto-restart during intentional shutdown
+    backendRestartAttempts = MAX_RESTART_ATTEMPTS;
+    stopHealthMonitor();
     if (backendProcess) {
         console.log('[Electron] Stopping backend...');
-        backendProcess.kill('SIGTERM');
+        // Windows doesn't support SIGTERM properly — use SIGINT then force kill
+        if (process.platform === 'win32') {
+            backendProcess.kill('SIGINT');
+            // Force kill after 5 seconds if still running
+            const pid = backendProcess.pid;
+            setTimeout(() => {
+                if (backendProcess && backendProcess.pid === pid) {
+                    try {
+                        process.kill(pid, 'SIGKILL');
+                    }
+                    catch { /* already dead */ }
+                }
+            }, 5000);
+        }
+        else {
+            backendProcess.kill('SIGTERM');
+        }
         backendProcess = null;
+    }
+}
+function startHealthMonitor() {
+    if (IS_DEV || healthCheckInterval)
+        return;
+    healthCheckInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`${BACKEND_URL}/health`, { signal: AbortSignal.timeout(5000) });
+            if (!response.ok)
+                throw new Error(`HTTP ${response.status}`);
+        }
+        catch {
+            console.warn('[Electron] Backend health check failed');
+            if (!backendProcess && backendRestartAttempts < MAX_RESTART_ATTEMPTS) {
+                console.log('[Electron] Backend appears dead, attempting restart...');
+                startBackend();
+            }
+        }
+    }, 30000); // Every 30 seconds
+}
+function stopHealthMonitor() {
+    if (healthCheckInterval) {
+        clearInterval(healthCheckInterval);
+        healthCheckInterval = null;
     }
 }
 // =============================================================================
 // IPC Handlers - Agent Capabilities
 // =============================================================================
+/**
+ * Validates that a file path is within the allowed data directory.
+ * Prevents path traversal attacks via IPC.
+ */
+function validateDataPath(filePath) {
+    const resolved = path.resolve(filePath);
+    if (!resolved.startsWith(DATA_DIR)) {
+        throw new Error(`Access denied: path must be within ${DATA_DIR}`);
+    }
+    return resolved;
+}
 function registerAgentIPC() {
     ipcMain.handle('agent:open-file', async (_event, filePath) => {
         if (typeof filePath !== 'string' || !filePath)
             throw new Error('Invalid path');
-        await shell.openPath(filePath);
+        const resolved = validateDataPath(filePath);
+        await shell.openPath(resolved);
         return { success: true };
     });
     ipcMain.handle('agent:read-file', async (_event, filePath) => {
         if (typeof filePath !== 'string' || !filePath)
             throw new Error('Invalid path');
-        const content = await fs.promises.readFile(filePath, 'utf-8');
+        const resolved = validateDataPath(filePath);
+        const content = await fs.promises.readFile(resolved, 'utf-8');
         return content;
+    });
+    ipcMain.handle('agent:write-file', async (_event, { path: filePath, content }) => {
+        if (typeof filePath !== 'string' || !filePath)
+            throw new Error('Invalid path');
+        if (typeof content !== 'string')
+            throw new Error('Invalid content');
+        const resolved = validateDataPath(filePath);
+        await fs.promises.writeFile(resolved, content, 'utf-8');
+        return { success: true };
     });
     ipcMain.handle('agent:list-dir', async (_event, dirPath) => {
         if (typeof dirPath !== 'string' || !dirPath)
             throw new Error('Invalid path');
-        const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+        const resolved = validateDataPath(dirPath);
+        const entries = await fs.promises.readdir(resolved, { withFileTypes: true });
         return entries.map((e) => ({
             name: e.name,
             isDirectory: e.isDirectory(),
@@ -119,6 +195,14 @@ function registerAgentIPC() {
         clipboard.writeText(text);
         return { success: true };
     });
+    ipcMain.handle('agent:get-paths', async () => {
+        const rootDir = path.resolve(__dirname, '..', '..', '..');
+        return {
+            root: rootDir,
+            data: path.join(rootDir, 'data'),
+            personas: path.join(rootDir, 'data', 'personas'),
+        };
+    });
 }
 // =============================================================================
 // IPC Handlers - Window Management
@@ -148,16 +232,14 @@ function createWindow() {
         height: 800,
         minWidth: 800,
         minHeight: 600,
-        frame: false, // Removemos o frame nativo padrão para customizar
-        titleBarStyle: 'hidden', // Esconde a barra de título padrão mas mantém controles
-        titleBarOverlay: {
-            color: '#0a0a0a', // Fundo escuro igual ao app
-            symbolColor: '#ffffff', // Ícones brancos
-            height: 32 // Altura um pouco maior para conforto
-        },
-        backgroundColor: '#0a0a0a',
+        backgroundColor: '#06040c',
         show: false,
-        autoHideMenuBar: true, // Remove a barra de menu (File, Edit, etc)
+        titleBarStyle: 'hidden',
+        titleBarOverlay: {
+            color: '#06040c',
+            symbolColor: '#e2e8f0',
+            height: 40,
+        },
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
@@ -183,15 +265,40 @@ function createWindow() {
         if (tray) {
             event.preventDefault();
             mainWindow?.hide();
+            mainWindow?.setSkipTaskbar(false); // Keep visible in taskbar when minimized to tray
         }
     });
     mainWindow.on('closed', () => {
         mainWindow = null;
     });
 }
+function createTrayIcon() {
+    // Generate a simple 16x16 tray icon with persona-like color
+    // This creates a small colored circle PNG in memory
+    const size = 16;
+    const canvas = Buffer.alloc(size * size * 4); // RGBA
+    for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+            const dx = x - size / 2;
+            const dy = y - size / 2;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const idx = (y * size + x) * 4;
+            if (dist <= size / 2 - 1) {
+                // Purple gradient for Ahri branding
+                canvas[idx] = 168; // R
+                canvas[idx + 1] = 85; // G
+                canvas[idx + 2] = 247; // B
+                canvas[idx + 3] = 255; // A
+            }
+            else {
+                canvas[idx + 3] = 0; // Transparent
+            }
+        }
+    }
+    return nativeImage.createFromBuffer(canvas, { width: size, height: size });
+}
 function createTray() {
-    // TODO: Usar ícone real quando disponível
-    const icon = nativeImage.createEmpty();
+    const icon = createTrayIcon();
     tray = new Tray(icon);
     const contextMenu = Menu.buildFromTemplate([
         {
@@ -321,6 +428,7 @@ app.whenReady().then(async () => {
     }
     createWindow();
     createTray();
+    startHealthMonitor();
 });
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {

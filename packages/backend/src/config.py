@@ -56,10 +56,15 @@ class Settings(BaseSettings):
     gh_token: str = ""
     gist_id: str = ""
 
+    # --- Google OAuth ---
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+
     # --- Agent Mode ---
     agent_mode_enabled: bool = True
-    agent_mode_orchestrator: str = "gemini-2.5-flash"  # or gemma-3-27b
-    agent_mode_default_workers: str = "gemma-3-4b,gemma-3-12b"
+    agent_mode_orchestrator: str = "gemini-2.5-pro-preview-06-05"  # PRO for planning
+    agent_mode_default_workers: str = "gemini-2.5-flash,gemma-3-27b-it"  # Flash primary, Gemma backup
+    agent_mode_use_oauth: bool = True  # Prefer OAuth credentials for agent mode
     google_ai_studio_api_key: str = ""  # For Gemma 3 workers (free tier)
     google_ai_studio_tpm_limit: int = 15000
     deepinfra_api_key: str = ""  # Fallback for Gemma 3

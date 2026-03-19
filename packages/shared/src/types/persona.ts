@@ -23,3 +23,13 @@ export interface PersonaListResponse {
   personas: PersonaSummary[];
   active: string;
 }
+
+export interface UpdatePersonaRequest {
+  display_name?: string;
+  archetype?: string;
+  universe?: string;
+  voice_language?: string;
+  primary_color?: string;
+  secondary_color?: string;
+  identity_text?: string;
+}

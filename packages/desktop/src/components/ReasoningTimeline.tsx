@@ -14,7 +14,7 @@ import type { AgentWorkerTask } from '@ahri/shared';
 
 interface Step {
   worker: string;
-  description: string;
+  description?: string;
   input?: Record<string, any>;
   depends_on?: number[];
 }
@@ -54,7 +54,7 @@ export function ReasoningTimeline({
     const stepIndex = steps.findIndex((step, idx) => {
       // Match by worker type and check if this task hasn't been completed yet
       return step.worker === lastTask.worker_type &&
-             workerTasks.filter(t => t.worker_type === step.worker).length === idx + 1;
+        workerTasks.filter(t => t.worker_type === step.worker).length === idx + 1;
     });
 
     return stepIndex;
@@ -85,7 +85,7 @@ export function ReasoningTimeline({
     return matchingTasks[stepIdx] || matchingTasks[matchingTasks.length - 1];
   };
 
-  const getStepIcon = (status: string): JSX.Element => {
+  const getStepIcon = (status: string) => {
     switch (status) {
       case 'completed':
         return (
@@ -106,13 +106,13 @@ export function ReasoningTimeline({
       case 'running':
         return (
           <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center">
-            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            <div className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: 'var(--spinner-track)', borderTopColor: 'var(--spinner-head)' }} />
           </div>
         );
       default: // pending
         return (
-          <div className="w-8 h-8 rounded-full border-2 border-white/20 flex items-center justify-center">
-            <div className="w-3 h-3 rounded-full bg-white/20" />
+          <div className="w-8 h-8 rounded-full border-2 flex items-center justify-center" style={{ borderColor: 'var(--border-medium)' }}>
+            <div className="w-3 h-3 rounded-full" style={{ background: 'var(--surface-elevated)' }} />
           </div>
         );
     }
@@ -156,8 +156,8 @@ export function ReasoningTimeline({
           </svg>
         </div>
         <div className="flex-1">
-          <h3 className="text-base font-semibold text-white/90 mb-2">Orchestrator Reasoning</h3>
-          <p className="text-sm text-white/70 leading-relaxed italic">
+          <h3 className="text-base font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>Orchestrator Reasoning</h3>
+          <p className="text-sm leading-relaxed italic" style={{ color: 'var(--text-secondary)' }}>
             "{reasoning}"
           </p>
         </div>
@@ -165,7 +165,7 @@ export function ReasoningTimeline({
 
       {/* Timeline */}
       <div className="space-y-1">
-        <div className="text-xs font-semibold text-white/50 mb-3 uppercase tracking-wider">
+        <div className="text-xs font-semibold mb-3 uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
           Execution Plan ({steps.length} steps)
         </div>
 
@@ -180,18 +180,20 @@ export function ReasoningTimeline({
               {/* Vertical line connector */}
               {idx < steps.length - 1 && (
                 <div
-                  className="absolute left-4 top-8 w-0.5 h-[calc(100%+4px)] bg-white/10"
+                  className="absolute left-4 top-8 w-0.5 h-[calc(100%+4px)]"
                   style={{
-                    background: status === 'completed' ? theme.primary + '40' : 'rgba(255,255,255,0.1)'
+                    background: status === 'completed' ? theme.primary + '40' : 'var(--border-subtle)'
                   }}
                 />
               )}
 
               {/* Step card */}
               <div
-                className={`relative bg-white/5 rounded-xl p-4 transition-all hover:bg-white/10 ${
-                  status === 'running' ? 'ring-2 ring-blue-500/50' : ''
-                }`}
+                className={`relative rounded-xl p-4 transition-all ${status === 'running' ? 'ring-2 ring-blue-500/50' : ''
+                  }`}
+                style={{ background: 'var(--surface-hover)' }}
+                onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-active)')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'var(--surface-hover)')}
               >
                 <div className="flex items-start gap-4">
                   {/* Status icon */}
@@ -199,7 +201,7 @@ export function ReasoningTimeline({
                     {getStepIcon(status)}
 
                     {/* Step number badge */}
-                    <div className="absolute -top-1 -right-1 w-5 h-5 bg-white/20 rounded-full flex items-center justify-center text-[10px] font-mono text-white border border-white/30">
+                    <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono border" style={{ background: 'var(--surface-elevated)', color: 'var(--text-primary)', borderColor: 'var(--spinner-track)' }}>
                       {idx}
                     </div>
                   </div>
@@ -209,13 +211,13 @@ export function ReasoningTimeline({
                     <div className="flex items-start justify-between gap-3 mb-2">
                       <div className="flex items-center gap-2">
                         <span className="text-lg">{getWorkerIcon(step.worker)}</span>
-                        <span className="text-sm font-semibold text-white/90">
+                        <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
                           {step.worker} Worker
                         </span>
 
                         {/* Dependencies indicator */}
                         {hasDependencies && (
-                          <span className="text-xs text-white/40 font-mono">
+                          <span className="text-xs font-mono" style={{ color: 'var(--text-tertiary)' }}>
                             ← depends on [{step.depends_on!.join(', ')}]
                           </span>
                         )}
@@ -224,7 +226,10 @@ export function ReasoningTimeline({
                       {/* Expand button */}
                       <button
                         onClick={() => toggleStep(idx)}
-                        className="text-white/40 hover:text-white/80 transition-colors flex-shrink-0"
+                        className="transition-colors flex-shrink-0"
+                        style={{ color: 'var(--text-tertiary)' }}
+                        onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-primary)')}
+                        onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-tertiary)')}
                       >
                         <svg
                           className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
@@ -238,13 +243,13 @@ export function ReasoningTimeline({
                     </div>
 
                     {/* Description */}
-                    <p className="text-sm text-white/60 leading-relaxed mb-2">
+                    <p className="text-sm leading-relaxed mb-2" style={{ color: 'var(--text-secondary)' }}>
                       {step.description}
                     </p>
 
                     {/* Metadata */}
                     {task && (
-                      <div className="flex items-center gap-3 text-xs text-white/40">
+                      <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--text-tertiary)' }}>
                         {task.created_at && (
                           <span className="flex items-center gap-1">
                             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -270,12 +275,12 @@ export function ReasoningTimeline({
 
                     {/* Expanded details */}
                     {isExpanded && (
-                      <div className="mt-3 pt-3 border-t border-white/10 space-y-2">
+                      <div className="mt-3 pt-3 border-t space-y-2" style={{ borderColor: 'var(--glass-border)' }}>
                         {/* Input parameters */}
                         {step.input && Object.keys(step.input).length > 0 && (
-                          <div className="bg-black/40 rounded-lg p-3">
-                            <div className="text-xs font-semibold text-cyan-400 mb-2">Input Parameters</div>
-                            <pre className="text-xs text-white/70 whitespace-pre-wrap font-mono">
+                          <div className="rounded-lg p-3" style={{ background: 'var(--code-bg)' }}>
+                            <div className="text-xs font-semibold mb-2" style={{ color: 'var(--info)' }}>Input Parameters</div>
+                            <pre className="text-xs whitespace-pre-wrap font-mono" style={{ color: 'var(--text-secondary)' }}>
                               {JSON.stringify(step.input, null, 2)}
                             </pre>
                           </div>
@@ -283,14 +288,14 @@ export function ReasoningTimeline({
 
                         {/* Output data */}
                         {task?.output_data && status === 'completed' && (
-                          <div className="bg-black/40 rounded-lg p-3">
-                            <div className="text-xs font-semibold text-green-400 mb-2 flex items-center gap-1">
+                          <div className="rounded-lg p-3" style={{ background: 'var(--code-bg)' }}>
+                            <div className="text-xs font-semibold mb-2 flex items-center gap-1" style={{ color: 'var(--success)' }}>
                               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                               </svg>
                               Output
                             </div>
-                            <pre className="text-xs text-white/70 whitespace-pre-wrap font-mono max-h-40 overflow-y-auto custom-scrollbar">
+                            <pre className="text-xs whitespace-pre-wrap font-mono max-h-40 overflow-y-auto custom-scrollbar" style={{ color: 'var(--text-secondary)' }}>
                               {JSON.stringify(task.output_data, null, 2)}
                             </pre>
                           </div>
@@ -298,9 +303,9 @@ export function ReasoningTimeline({
 
                         {/* Error */}
                         {task?.error && status === 'failed' && (
-                          <div className="bg-red-500/10 rounded-lg p-3 border border-red-500/20">
-                            <div className="text-xs font-semibold text-red-400 mb-2">Error</div>
-                            <p className="text-xs text-red-300/90 font-mono">{task.error}</p>
+                          <div className="rounded-lg p-3 border" style={{ background: 'var(--error-bg, rgba(239,68,68,0.1))', borderColor: 'var(--error-border, rgba(239,68,68,0.2))' }}>
+                            <div className="text-xs font-semibold mb-2" style={{ color: 'var(--error)' }}>Error</div>
+                            <p className="text-xs font-mono" style={{ color: 'var(--error)' }}>{task.error}</p>
                           </div>
                         )}
                       </div>
@@ -314,8 +319,8 @@ export function ReasoningTimeline({
       </div>
 
       {/* Summary stats */}
-      <div className="mt-6 pt-4 border-t border-white/10">
-        <div className="flex items-center justify-between text-xs text-white/50">
+      <div className="mt-6 pt-4 border-t" style={{ borderColor: 'var(--glass-border)' }}>
+        <div className="flex items-center justify-between text-xs" style={{ color: 'var(--text-tertiary)' }}>
           <div className="flex items-center gap-4">
             <span>
               Completed: {steps.filter((_, idx) => getStepStatus(idx) === 'completed').length}/{steps.length}
@@ -328,7 +333,7 @@ export function ReasoningTimeline({
           </div>
 
           {currentStepIdx >= 0 && currentStepIdx < steps.length && (
-            <div className="text-blue-400">
+            <div style={{ color: 'var(--info)' }}>
               Current: Step {currentStepIdx} ({steps[currentStepIdx].worker})
             </div>
           )}

@@ -1,12 +1,12 @@
 import { useAgentStore } from '@/stores/agent-store';
 import type { AgentTask } from '@ahri/shared';
 
-const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }> = {
-  pending:   { bg: 'bg-yellow-500/20', text: 'text-yellow-300', label: 'Pending' },
-  approved:  { bg: 'bg-blue-500/20',   text: 'text-blue-300',   label: 'Approved' },
-  running:   { bg: 'bg-blue-500/20',   text: 'text-blue-300',   label: 'Running' },
-  completed: { bg: 'bg-green-500/20',  text: 'text-green-300',  label: 'Completed' },
-  failed:    { bg: 'bg-red-500/20',    text: 'text-red-300',    label: 'Failed' },
+const STATUS_STYLES: Record<string, { color: string; label: string }> = {
+  pending:   { color: 'var(--warning)', label: 'Pending' },
+  approved:  { color: 'var(--info)',    label: 'Approved' },
+  running:   { color: 'var(--info)',    label: 'Running' },
+  completed: { color: 'var(--success)', label: 'Completed' },
+  failed:    { color: 'var(--error)',   label: 'Failed' },
 };
 
 function TaskCard({ task }: { task: AgentTask }) {
@@ -18,21 +18,21 @@ function TaskCard({ task }: { task: AgentTask }) {
     <div className="glass rounded-xl p-3 space-y-2">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <span className="text-xs text-white/80 font-medium font-mono">
+        <span className="text-xs font-medium font-mono" style={{ color: 'var(--text-primary)' }}>
           {task.capability}
         </span>
-        <span className={`text-[10px] px-2 py-0.5 rounded-full ${style.bg} ${style.text}`}>
+        <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ color: style.color, background: `color-mix(in srgb, ${style.color} 20%, transparent)` }}>
           {style.label}
         </span>
       </div>
 
       {/* Parameters */}
       {Object.keys(task.parameters).length > 0 && (
-        <div className="text-[11px] text-white/50 bg-black/20 rounded-lg p-2 font-mono break-all">
+        <div className="text-[11px] rounded-lg p-2 font-mono break-all" style={{ color: 'var(--text-secondary)', background: 'var(--code-bg)' }}>
           {Object.entries(task.parameters).map(([k, v]) => (
             <div key={k}>
-              <span className="text-white/30">{k}:</span>{' '}
-              <span className="text-white/60">{String(v)}</span>
+              <span style={{ color: 'var(--text-tertiary)' }}>{k}:</span>{' '}
+              <span style={{ color: 'var(--text-secondary)' }}>{String(v)}</span>
             </div>
           ))}
         </div>
@@ -40,12 +40,12 @@ function TaskCard({ task }: { task: AgentTask }) {
 
       {/* Result or Error */}
       {task.status === 'completed' && task.result && (
-        <div className="text-[11px] text-green-300/70 bg-green-500/5 rounded-lg p-2 break-all max-h-24 overflow-y-auto">
+        <div className="text-[11px] rounded-lg p-2 break-all max-h-24 overflow-y-auto" style={{ color: 'var(--success)', background: 'var(--surface-hover)' }}>
           {task.result}
         </div>
       )}
       {task.status === 'failed' && task.error && (
-        <div className="text-[11px] text-red-300/70 bg-red-500/5 rounded-lg p-2 break-all max-h-24 overflow-y-auto">
+        <div className="text-[11px] rounded-lg p-2 break-all max-h-24 overflow-y-auto" style={{ color: 'var(--error)', background: 'var(--surface-hover)' }}>
           {task.error}
         </div>
       )}
@@ -55,13 +55,15 @@ function TaskCard({ task }: { task: AgentTask }) {
         <div className="flex gap-2 pt-1">
           <button
             onClick={() => approveTask(task.id)}
-            className="flex-1 py-1.5 rounded-lg text-[11px] font-medium bg-green-500/20 text-green-300 hover:bg-green-500/30 transition-colors"
+            className="flex-1 py-1.5 rounded-lg text-[11px] font-medium transition-colors"
+            style={{ color: 'var(--success)', background: 'color-mix(in srgb, var(--success) 20%, transparent)' }}
           >
             Approve
           </button>
           <button
             onClick={() => updateTask(task.id, { status: 'failed', error: 'Denied by user' })}
-            className="flex-1 py-1.5 rounded-lg text-[11px] font-medium bg-red-500/20 text-red-300 hover:bg-red-500/30 transition-colors"
+            className="flex-1 py-1.5 rounded-lg text-[11px] font-medium transition-colors"
+            style={{ color: 'var(--error)', background: 'color-mix(in srgb, var(--error) 20%, transparent)' }}
           >
             Deny
           </button>
@@ -70,7 +72,7 @@ function TaskCard({ task }: { task: AgentTask }) {
 
       {/* Timestamp */}
       {task.created_at && (
-        <p className="text-[9px] text-white/20">
+        <p className="text-[9px]" style={{ color: 'var(--text-tertiary)' }}>
           {new Date(task.created_at).toLocaleTimeString()}
         </p>
       )}
@@ -87,13 +89,13 @@ export function AgentPanel() {
   const hasCompleted = tasks.some((t) => t.status === 'completed' || t.status === 'failed');
 
   return (
-    <aside className="w-80 h-full glass-dark flex flex-col border-l border-white/5">
+    <aside className="w-80 h-full glass-dark flex flex-col border-l" style={{ borderColor: 'var(--glass-border)' }}>
       {/* Header */}
-      <div className="p-4 border-b border-white/5 flex items-center justify-between">
+      <div className="p-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--glass-border)' }}>
         <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-white/80">Agent Tasks</h2>
+          <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Agent Tasks</h2>
           {pendingCount > 0 && (
-            <span className="w-5 h-5 bg-yellow-500/30 rounded-full text-[10px] text-yellow-300 flex items-center justify-center">
+            <span className="w-5 h-5 rounded-full text-[10px] flex items-center justify-center" style={{ background: 'color-mix(in srgb, var(--warning) 30%, transparent)', color: 'var(--warning)' }}>
               {pendingCount}
             </span>
           )}
@@ -102,7 +104,8 @@ export function AgentPanel() {
           {hasCompleted && (
             <button
               onClick={clearCompleted}
-              className="p-1.5 rounded-lg hover:bg-white/5 transition-colors text-white/30 hover:text-white/60 text-[10px]"
+              className="p-1.5 rounded-lg transition-colors text-[10px]"
+              style={{ color: 'var(--text-tertiary)' }}
               title="Clear completed"
             >
               Clear
@@ -110,7 +113,8 @@ export function AgentPanel() {
           )}
           <button
             onClick={() => setPanelOpen(false)}
-            className="p-1.5 rounded-lg hover:bg-white/5 transition-colors text-white/30 hover:text-white/60"
+            className="p-1.5 rounded-lg transition-colors"
+            style={{ color: 'var(--text-tertiary)' }}
             title="Close panel"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -126,8 +130,8 @@ export function AgentPanel() {
         {tasks.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
-              <p className="text-sm text-white/20">No tasks</p>
-              <p className="text-[10px] text-white/10 mt-1">
+              <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>No tasks</p>
+              <p className="text-[10px] mt-1" style={{ color: 'var(--text-tertiary)' }}>
                 Agent tasks will appear here
               </p>
             </div>
@@ -138,8 +142,8 @@ export function AgentPanel() {
       </div>
 
       {/* Footer */}
-      <div className="p-3 border-t border-white/5">
-        <p className="text-[10px] text-white/20 text-center">
+      <div className="p-3" style={{ borderTop: '1px solid var(--glass-border)' }}>
+        <p className="text-[10px] text-center" style={{ color: 'var(--text-tertiary)' }}>
           {tasks.length} task{tasks.length !== 1 ? 's' : ''} total
         </p>
       </div>

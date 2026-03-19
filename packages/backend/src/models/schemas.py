@@ -25,6 +25,15 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class ResetPasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(..., min_length=4, max_length=100)
+
+
+class ForceResetRequest(BaseModel):
+    new_password: str = Field(..., min_length=4, max_length=100)
+
+
 # =============================================================================
 # Personas
 # =============================================================================
@@ -57,6 +66,28 @@ class PersonaDetail(PersonaSummary):
 class PersonaListResponse(BaseModel):
     personas: list[PersonaSummary]
     active: str
+
+
+class CreatePersonaRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=50, pattern=r"^[a-z0-9_-]+$")
+    display_name: str = Field(..., min_length=1, max_length=100)
+    archetype: str = ""
+    universe: str = ""
+    voice_language: str = "pt-br"
+    primary_color: str = "#d8b4d8"
+    secondary_color: str = "#e9cce9"
+    identity_text: str = ""
+    spotify_genres: list[str] = []
+
+
+class UpdatePersonaRequest(BaseModel):
+    display_name: Optional[str] = None
+    archetype: Optional[str] = None
+    universe: Optional[str] = None
+    voice_language: Optional[str] = None
+    primary_color: Optional[str] = None
+    secondary_color: Optional[str] = None
+    identity_text: Optional[str] = None
 
 
 # =============================================================================
@@ -140,6 +171,68 @@ class MemoryLearnRequest(BaseModel):
 
 class MemoryForgetRequest(BaseModel):
     topic: str
+
+
+# =============================================================================
+# Settings
+# =============================================================================
+class SettingsSchema(BaseModel):
+    gemini_api_key_paid: str = ""
+    gemini_api_key_free: str = ""
+    openrouter_api_key: str = ""
+    openrouter_model_name: str = ""
+    
+    cse_api_key: str = ""
+    cse_cx: str = ""
+    
+    spotipy_client_id: str = ""
+    spotipy_client_secret: str = ""
+    spotipy_redirect_uri: str = ""
+    
+    agent_mode_enabled: bool = True
+    agent_mode_orchestrator: str = ""
+    ollama_base_url: str = ""
+
+    google_api_key_vision_a: str = ""
+    google_api_key_vision_b: str = ""
+    google_api_key_manager: str = ""
+    
+    google_api_key_search: str = ""
+    google_api_key_search_b: str = ""
+    
+    google_ai_studio_api_key: str = ""
+    google_ai_studio_tpm_limit: int = 15000
+    
+    deepinfra_api_key: str = ""
+    gh_token: str = ""
+    gist_id: str = ""
+
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+
+
+class UpdateSettingsRequest(BaseModel):
+    settings: dict  # Partial update
+
+
+# =============================================================================
+# OAuth & Models
+# =============================================================================
+class AvailableModelSchema(BaseModel):
+    id: str
+    display_name: str
+    provider: str  # google_oauth, google_apikey, openrouter, ollama
+    color: str = "#8B5CF6"
+    description: str = ""
+    input_token_limit: int = 0
+    output_token_limit: int = 0
+
+
+class OAuthStatusResponse(BaseModel):
+    configured: bool = False
+    connected: bool = False
+    email: Optional[str] = None
+    models: list[AvailableModelSchema] = []
 
 
 # =============================================================================
