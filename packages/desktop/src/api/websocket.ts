@@ -13,19 +13,33 @@ type ErrorHandler = (error: string) => void;
 
 export class ChatWebSocket {
   private ws: WebSocket | null = null;
-  private onChunk: ChunkHandler = () => {};
-  private onDone: DoneHandler = () => {};
-  private onError: ErrorHandler = () => {};
+  private onChunk: ChunkHandler = () => { };
+  private onDone: DoneHandler = () => { };
+  private onError: ErrorHandler = () => { };
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
+  private reconnectTimeout: NodeJS.Timeout | null = null;
+  private isManuallyDisconnected = false;
+  private isConnecting = false;
 
   async connect(): Promise<boolean> {
+    if (this.ws?.readyState === WebSocket.OPEN) return true;
+    if (this.isConnecting) return false;
+
+    this.isConnecting = true;
+    this.isManuallyDisconnected = false;
+
     return new Promise((resolve) => {
       try {
+        if (this.ws) {
+          this.ws.close();
+          this.ws = null;
+        }
+
         this.ws = api.createChatWebSocket();
 
         this.ws.onopen = () => {
-          // Autentica
+          // Send auth immediately
           this.ws?.send(
             JSON.stringify({ type: 'auth', token: api.getAccessToken() }),
           );
@@ -38,9 +52,13 @@ export class ChatWebSocket {
             case 'auth':
               if (data.status === 'ok') {
                 this.reconnectAttempts = 0;
+                this.isConnecting = false;
                 resolve(true);
               } else {
+                this.isConnecting = false;
                 resolve(false);
+                // Auth failed, probably shouldn't retry endlessly without new token
+                this.disconnect();
               }
               break;
             case 'chunk':
@@ -56,16 +74,50 @@ export class ChatWebSocket {
         };
 
         this.ws.onerror = () => {
-          resolve(false);
+          if (this.isConnecting) {
+            this.isConnecting = false;
+            resolve(false);
+          }
+          // onerror usually precedes onclose, so we let onclose handle reconnect
         };
 
         this.ws.onclose = () => {
           this.ws = null;
+          if (this.isConnecting) {
+            this.isConnecting = false;
+            resolve(false);
+          }
+
+          if (!this.isManuallyDisconnected) {
+            this.scheduleReconnect();
+          }
         };
-      } catch {
+      } catch (e) {
+        this.isConnecting = false;
         resolve(false);
+        if (!this.isManuallyDisconnected) {
+          this.scheduleReconnect();
+        }
       }
     });
+  }
+
+  private scheduleReconnect() {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.warn('[ChatWS] Max reconnect attempts reached');
+      return;
+    }
+
+    if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
+
+    this.reconnectAttempts++;
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+
+    console.log(`[ChatWS] Reconnecting in ${delay}ms (Attempt ${this.reconnectAttempts})`);
+
+    this.reconnectTimeout = setTimeout(() => {
+      this.connect();
+    }, delay);
   }
 
   sendMessage(
@@ -78,6 +130,10 @@ export class ChatWebSocket {
   ) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       this.onError('WebSocket not connected');
+      // Try to reconnect for next time, though this message will fail (fallback handled by store)
+      if (!this.isConnecting && !this.isManuallyDisconnected) {
+        this.connect();
+      }
       return;
     }
 
@@ -105,7 +161,15 @@ export class ChatWebSocket {
   }
 
   disconnect() {
+    this.isManuallyDisconnected = true;
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+
     if (this.ws) {
+      // Prevent onclose from triggering reconnect by setting flag (already done above)
+      // Remove handlers to avoid potential memory leaks or zombie callbacks
       this.ws.onmessage = null;
       this.ws.onerror = null;
       this.ws.onclose = null;
@@ -113,6 +177,7 @@ export class ChatWebSocket {
       this.ws.close();
       this.ws = null;
     }
+    this.isConnecting = false;
   }
 
   get isConnected(): boolean {

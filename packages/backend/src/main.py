@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.config import get_settings
 from src.models.database import init_db, close_db
-from src.routers import auth, chat, personas, memory, sessions, agent, search, spotify, agent_mode
+from src.routers import auth, chat, personas, memory, sessions, agent, search, spotify, agent_mode, settings, google_oauth
 
 logger = logging.getLogger("ahri.main")
 
@@ -72,6 +72,8 @@ app.include_router(agent.router, prefix="/agent", tags=["Agent"])
 app.include_router(agent_mode.router)  # Agent mode has its own prefix
 app.include_router(search.router, prefix="/search", tags=["Search"])
 app.include_router(spotify.router, prefix="/spotify", tags=["Spotify"])
+app.include_router(settings.router, prefix="/settings", tags=["Settings"])
+app.include_router(google_oauth.router, prefix="/oauth", tags=["OAuth"])
 
 
 @app.get("/health")

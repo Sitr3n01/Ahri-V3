@@ -1,6 +1,8 @@
 """
 LLM Service - Orquestra chamadas aos diferentes LLM backends.
 Portar de AIEngine (brain.py linhas 639-1358).
+
+Suporta OAuth (plano Pro do Gemini) e API keys como fallback.
 """
 import re
 import logging
@@ -18,63 +20,126 @@ logger = logging.getLogger("ahri.llm_service")
 
 
 class LLMService:
-    """Servico de LLM multi-backend."""
+    """Servico de LLM multi-backend com suporte a OAuth."""
 
-    # Modelos disponiveis
-    MODELS = {
+    # Modelos legados (fallback quando OAuth não está conectado)
+    LEGACY_MODELS = {
         "PRO": "gemini-2.5-pro-preview-06-05",
         "GOOGLE": "gemma-3-27b-it",
         "DEEPSEEK": "deepseek/deepseek-r1:free",
         "LOCAL": "gpt-oss:20b",
     }
 
+    # Alias para compatibilidade
+    MODELS = LEGACY_MODELS
+
     def __init__(self):
         self.settings = get_settings()
         self.mode = "PRO"
+        self._active_model_id = ""  # model ID real (ex: "gemini-2.5-flash")
         self.memory_notifications: list[str] = []
 
-        # Inicializa clientes
+        # Clientes
         self._gemini_pro = None
         self._gemini_free = None
+        self._gemini_oauth = None  # Cliente OAuth (prioridade)
         self._openrouter = None
         self._ollama = None
+        self._use_oauth = False
 
         self._init_clients()
 
     def _init_clients(self):
-        """Inicializa clientes LLM baseado nas chaves disponiveis."""
+        """Inicializa clientes LLM. OAuth tem prioridade sobre API keys."""
         s = self.settings
 
+        # 1. Tenta OAuth primeiro
+        self._use_oauth = False
+        self._gemini_oauth = None
+        try:
+            from src.services.google_oauth_service import get_google_oauth_service
+            oauth_svc = get_google_oauth_service()
+            if oauth_svc.is_connected:
+                creds = oauth_svc.get_credentials()
+                if creds:
+                    # Cria client OAuth com modelo padrão (será trocado via set_mode)
+                    self._gemini_oauth = GeminiClient(
+                        model_name="gemini-2.5-flash",
+                        credentials=creds,
+                    )
+                    self._use_oauth = True
+                    logger.info("LLM clients initialized with OAuth credentials")
+        except Exception as e:
+            logger.warning(f"OAuth init failed, falling back to API keys: {e}")
+
+        # 2. API key clients (fallback ou uso paralelo)
         if s.gemini_primary_key:
-            self._gemini_pro = GeminiClient(s.gemini_primary_key, self.MODELS["PRO"])
+            self._gemini_pro = GeminiClient(s.gemini_primary_key, self.LEGACY_MODELS["PRO"])
 
         if s.gemini_fallback_key:
-            self._gemini_free = GeminiClient(s.gemini_fallback_key, self.MODELS["GOOGLE"])
+            self._gemini_free = GeminiClient(s.gemini_fallback_key, self.LEGACY_MODELS["GOOGLE"])
 
         if s.openrouter_api_key:
             self._openrouter = OpenRouterClient(s.openrouter_api_key, s.openrouter_model_name)
 
-        self._ollama = OllamaClient(self.MODELS["LOCAL"])
+        self._ollama = OllamaClient(self.LEGACY_MODELS["LOCAL"])
 
     def set_mode(self, mode: str):
-        """Troca o modo/modelo ativo."""
+        """Troca o modo/modelo ativo.
+
+        Aceita:
+        - Modos legados: "PRO", "GOOGLE", "DEEPSEEK", "LOCAL", "FLASH"
+        - Model IDs diretos: "gemini-2.5-pro", "gemini-2.5-flash", etc.
+        """
         if mode == "FLASH":
             mode = "GOOGLE"
-        if mode in self.MODELS:
+
+        # Modos legados
+        if mode in self.LEGACY_MODELS:
             self.mode = mode
-            logger.info(f"Mode switched to {mode} ({self.MODELS[mode]})")
+            self._active_model_id = self.LEGACY_MODELS[mode]
+            # Se OAuth ativo e é modelo Google, atualiza o client OAuth
+            if self._use_oauth and self._gemini_oauth and mode in ("PRO", "GOOGLE"):
+                self._gemini_oauth.model_name = self.LEGACY_MODELS[mode]
+            logger.info(f"Mode switched to {mode} ({self._active_model_id})")
+            return
+
+        # Model ID direto (ex: "gemini-2.5-flash", "gemini-2.5-pro")
+        if mode.startswith("gemini-") or mode.startswith("gemma-"):
+            self.mode = "OAUTH_GOOGLE"
+            self._active_model_id = mode
+            if self._gemini_oauth:
+                self._gemini_oauth.model_name = mode
+            logger.info(f"Mode switched to direct model: {mode}")
+            return
+
+        # Desconhecido — tenta como modelo legado PRO
+        logger.warning(f"Unknown mode '{mode}', defaulting to PRO")
+        self.mode = "PRO"
+        self._active_model_id = self.LEGACY_MODELS["PRO"]
 
     def get_client_for_mode(self) -> Optional[GeminiClient | OpenRouterClient | OllamaClient]:
         """Retorna o cliente correto para o modo atual."""
+        if self.mode == "DEEPSEEK":
+            return self._openrouter
+        if self.mode == "LOCAL":
+            return self._ollama
+
+        # Para modos Google (PRO, GOOGLE, OAUTH_GOOGLE): OAuth > API key
+        if self._use_oauth and self._gemini_oauth:
+            return self._gemini_oauth
+
         if self.mode == "PRO":
             return self._gemini_pro
         elif self.mode == "GOOGLE":
             return self._gemini_free
-        elif self.mode == "DEEPSEEK":
-            return self._openrouter
-        elif self.mode == "LOCAL":
-            return self._ollama
-        return self._gemini_free
+
+        # Fallback
+        return self._gemini_oauth or self._gemini_pro or self._gemini_free
+
+    def _is_gemini_mode(self) -> bool:
+        """Checa se o modo atual usa Gemini (Google)."""
+        return self.mode in ("PRO", "GOOGLE", "OAUTH_GOOGLE")
 
     def generate_response(
         self,
@@ -121,7 +186,7 @@ class LLMService:
             yield from self._generate_openrouter(message, system_prompt, history, rag_context)
             return
 
-        # Gemini (PRO ou GOOGLE)
+        # Gemini (PRO, GOOGLE ou OAuth direto)
         if has_multimodal:
             yield from self._generate_gemini_multimodal(
                 message, system_prompt, history, rag_context, images, video, pdfs, uploaded_files
@@ -132,10 +197,10 @@ class LLMService:
     def _generate_gemini(
         self, message: str, system_prompt: str, history: list[dict], rag_context: str
     ) -> Generator[str, None, None]:
-        """Gera com Gemini (PRO ou GOOGLE/Gemma)."""
-        client = self._gemini_pro if self.mode == "PRO" else self._gemini_free
-        if not client:
-            yield "[ERROR] No Gemini API key configured."
+        """Gera com Gemini (OAuth, PRO ou GOOGLE/Gemma)."""
+        client = self.get_client_for_mode()
+        if not client or not isinstance(client, GeminiClient):
+            yield "[ERROR] No Gemini client available. Configure OAuth or API key."
             return
 
         try:
@@ -169,23 +234,26 @@ class LLMService:
         pdfs: Optional[list[dict]] = None,
         uploaded_files: Optional[list] = None,
     ) -> Generator[str, None, None]:
-        """Gera com Gemini usando vision model (flash) para multimodal."""
+        """Gera com Gemini usando vision model para multimodal."""
         try:
             import base64
             import io
             from PIL import Image as PILImage
 
-            # Usa Gemini Flash para vision (mais rápido e barato)
-            client = self._gemini_free if self._gemini_free else self._gemini_pro
+            # Prioridade para multimodal: OAuth > free (Flash) > pro
+            client = self.get_client_for_mode()
+            if not client or not isinstance(client, GeminiClient):
+                # Tenta fallback
+                client = self._gemini_free or self._gemini_pro
             if not client:
-                yield "[ERROR] No Gemini API key configured."
+                yield "[ERROR] No Gemini client available for multimodal."
                 return
 
             # Cria model direto (não usa chat session para multimodal)
-            model = client.model
+            model = client.create_model(system_prompt)
 
             # Monta inputs multimodais
-            inputs = [system_prompt + rag_context + "\n\nUser: " + message]
+            inputs = [rag_context + "\n\nUser: " + message if rag_context else "User: " + message]
 
             # Adiciona imagens
             if images:
@@ -260,13 +328,41 @@ class LLMService:
         except Exception as e:
             yield f"[Local Error] {e}"
 
+    def get_agent_client(self, model_name: Optional[str] = None) -> Optional[GeminiClient]:
+        """Retorna o melhor cliente disponível para agent mode.
+
+        Prioridade: OAuth > API key (paid) > API key (free).
+        Se model_name fornecido, configura o client com esse modelo.
+        """
+        target_model = model_name or self.settings.agent_mode_orchestrator
+
+        # 1. OAuth tem prioridade se configurado
+        if self.settings.agent_mode_use_oauth and self._use_oauth and self._gemini_oauth:
+            self._gemini_oauth.model_name = target_model
+            return self._gemini_oauth
+
+        # 2. API key clients
+        client = self._gemini_pro or self._gemini_free
+        if client:
+            # Cria novo client para não interferir no chat
+            return GeminiClient(
+                api_key=self.settings.gemini_primary_key or self.settings.gemini_fallback_key,
+                model_name=target_model,
+            )
+
+        return None
+
     def generate_rest(self, prompt: str, temperature: float = 0.2) -> Optional[str]:
         """Gera conteudo via REST (para memory analyzer, background tasks)."""
+        # Prioridade: OAuth > API key
+        if self._use_oauth and self._gemini_oauth:
+            return self._gemini_oauth.generate_content_rest(prompt, temperature)
+
         client = self._gemini_free or self._gemini_pro
         if not client:
             return None
         # Usa REST API em vez de SDK para evitar locks globais
-        rest_client = GeminiClient(self.settings.memory_key, self.MODELS["GOOGLE"])
+        rest_client = GeminiClient(self.settings.memory_key, self.LEGACY_MODELS["GOOGLE"])
         return rest_client.generate_content_rest(prompt, temperature)
 
 

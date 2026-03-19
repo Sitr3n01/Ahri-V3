@@ -163,6 +163,6 @@ export const personaThemes: Record<string, PersonaTheme> = {
 export const DEFAULT_PERSONA = 'ahri';
 
 export function getPersonaTheme(name: string): PersonaTheme {
-  const key = name.toLowerCase();
+  const key = name.toLowerCase().replace(/_/g, ' ');
   return personaThemes[key] ?? personaThemes[DEFAULT_PERSONA];
 }

@@ -13,11 +13,13 @@ electron_1.contextBridge.exposeInMainWorld('ahri', {
     agent: {
         openFile: (path) => electron_1.ipcRenderer.invoke('agent:open-file', path),
         readFile: (path) => electron_1.ipcRenderer.invoke('agent:read-file', path),
+        writeFile: (path, content) => electron_1.ipcRenderer.invoke('agent:write-file', { path, content }),
         listDir: (path) => electron_1.ipcRenderer.invoke('agent:list-dir', path),
         openUrl: (url) => electron_1.ipcRenderer.invoke('agent:open-url', url),
         getSystemInfo: () => electron_1.ipcRenderer.invoke('agent:system-info'),
         readClipboard: () => electron_1.ipcRenderer.invoke('agent:clipboard-read'),
         writeClipboard: (text) => electron_1.ipcRenderer.invoke('agent:clipboard-write', text),
+        getPaths: () => electron_1.ipcRenderer.invoke('agent:get-paths'),
     },
     // Window management
     window: {

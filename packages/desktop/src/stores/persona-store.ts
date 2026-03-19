@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { PersonaSummary } from '@ahri/shared';
+import type { PersonaSummary, SpotifyContext } from '@ahri/shared';
 import { getPersonaTheme, type PersonaTheme } from '@ahri/shared';
 import { api } from '@/api/client';
 
@@ -8,13 +8,18 @@ interface PersonaState {
   activePersona: string;
   personas: PersonaSummary[];
   isLoading: boolean;
+  error: string | null;
   backgroundOpacity: number; // 0-100 (percentage)
+  spotifyContext: SpotifyContext | null;
+  isSyncingSpotify: boolean;
 
   setActivePersona: (name: string) => void;
-  fetchPersonas: () => Promise<void>;
+  fetchPersonas: (retryCount?: number) => Promise<void>;
   activatePersona: (name: string) => Promise<void>;
   getTheme: () => PersonaTheme;
   setBackgroundOpacity: (opacity: number) => void;
+  fetchSpotifyContext: () => Promise<void>;
+  syncPersonaByMusic: () => Promise<string | null>;
 }
 
 export const usePersonaStore = create<PersonaState>()(
@@ -23,22 +28,35 @@ export const usePersonaStore = create<PersonaState>()(
       activePersona: 'ahri',
       personas: [],
       isLoading: false,
-      backgroundOpacity: 12, // Default 12%
+      error: null,
+      backgroundOpacity: 40, // Default 40%
+      spotifyContext: null,
+      isSyncingSpotify: false,
 
       setActivePersona: (name) => set({ activePersona: name }),
 
-      fetchPersonas: async () => {
-        set({ isLoading: true });
+      fetchPersonas: async (retryCount = 0) => {
+        set({ isLoading: true, error: null });
         try {
           const data = await api.listPersonas();
           set({
             personas: data.personas,
             activePersona: data.active,
             isLoading: false,
+            error: null,
           });
-        } catch (e) {
-          console.error('Failed to fetch personas:', e);
-          set({ isLoading: false });
+        } catch (e: any) {
+          const message = e?.message || 'Falha ao carregar personas';
+          console.error(`Failed to fetch personas (attempt ${retryCount + 1}):`, e);
+
+          if (retryCount < 2) {
+            // Auto-retry after 2s, max 2 retries
+            setTimeout(() => {
+              get().fetchPersonas(retryCount + 1);
+            }, 2000);
+          } else {
+            set({ isLoading: false, error: message });
+          }
         }
       },
 
@@ -54,10 +72,36 @@ export const usePersonaStore = create<PersonaState>()(
       getTheme: () => getPersonaTheme(get().activePersona),
 
       setBackgroundOpacity: (opacity) => set({ backgroundOpacity: opacity }),
+
+      fetchSpotifyContext: async () => {
+        try {
+          const ctx = await api.getSpotifyContext();
+          set({ spotifyContext: ctx });
+        } catch (e) {
+          console.error('Failed to fetch Spotify context:', e);
+        }
+      },
+
+      syncPersonaByMusic: async () => {
+        set({ isSyncingSpotify: true });
+        try {
+          const result = await api.syncPersonaByMusic();
+          if (result.switched) {
+            set({ activePersona: result.persona, isSyncingSpotify: false });
+            return result.persona;
+          }
+          set({ isSyncingSpotify: false });
+          return null;
+        } catch (e) {
+          console.error('Failed to sync persona by music:', e);
+          set({ isSyncingSpotify: false });
+          return null;
+        }
+      },
     }),
     {
-      name: 'persona-preferences', // localStorage key
-      partialize: (state) => ({ backgroundOpacity: state.backgroundOpacity }), // Only persist opacity
+      name: 'persona-preferences',
+      partialize: (state) => ({ backgroundOpacity: state.backgroundOpacity }),
     }
   )
 );

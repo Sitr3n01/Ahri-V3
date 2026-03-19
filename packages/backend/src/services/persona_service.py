@@ -3,13 +3,17 @@ Persona Service - Gerenciamento de personas.
 Portar de PersonaManager (brain.py linhas 377-575).
 """
 import logging
+import shutil
 from pathlib import Path
 from typing import Optional
 
 import yaml
 
 from src.config import get_settings
-from src.models.schemas import PersonaSummary, PersonaDetail, PersonaTheme
+from src.models.schemas import (
+    PersonaSummary, PersonaDetail, PersonaTheme,
+    UpdatePersonaRequest, CreatePersonaRequest,
+)
 
 logger = logging.getLogger("ahri.persona")
 
@@ -77,24 +81,28 @@ def list_personas() -> list[PersonaSummary]:
         if not persona_file.exists():
             continue
 
-        data = _parse_persona_file(p_dir)
-        theme_data = data.get("theme", {})
+        try:
+            data = _parse_persona_file(p_dir)
+            theme_data = data.get("theme", {})
 
-        result.append(PersonaSummary(
-            name=data["name"],
-            display_name=data["display_name"],
-            archetype=data.get("archetype", ""),
-            universe=data.get("universe", ""),
-            theme=PersonaTheme(
-                primary=theme_data.get("primary", "#d8b4d8"),
-                secondary=theme_data.get("secondary", "#e9cce9"),
-                shadow=theme_data.get("shadow", "rgba(192, 132, 192, 0.25)"),
-                glow=theme_data.get("glow", "rgba(216, 180, 216, 0.6)"),
-                avatar=theme_data.get("avatar", ""),
-                background=theme_data.get("background", ""),
-                background_mobile=theme_data.get("background_mobile", ""),
-            ),
-        ))
+            result.append(PersonaSummary(
+                name=data["name"],
+                display_name=data["display_name"],
+                archetype=data.get("archetype", ""),
+                universe=data.get("universe", ""),
+                theme=PersonaTheme(
+                    primary=theme_data.get("primary", "#d8b4d8"),
+                    secondary=theme_data.get("secondary", "#e9cce9"),
+                    shadow=theme_data.get("shadow", "rgba(192, 132, 192, 0.25)"),
+                    glow=theme_data.get("glow", "rgba(216, 180, 216, 0.6)"),
+                    avatar=theme_data.get("avatar", ""),
+                    background=theme_data.get("background", ""),
+                    background_mobile=theme_data.get("background_mobile", ""),
+                ),
+            ))
+        except Exception as e:
+            logger.warning(f"Failed to parse persona '{p_dir.name}': {e}")
+            continue
 
     return result
 
@@ -156,3 +164,133 @@ def load_persona_knowledge(name: str) -> str:
     if knowledge_file.exists():
         return knowledge_file.read_text(encoding="utf-8")
     return ""
+
+
+def _write_persona_file(persona_dir: Path, data: dict, identity_text: str) -> None:
+    """Updates the persona.md file with new frontmatter and content."""
+    persona_file = persona_dir / "persona.md"
+
+    # Clean up data to only include frontmatter fields
+    frontmatter = {
+        "name": data.get("name"),
+        "display_name": data.get("display_name"),
+        "archetype": data.get("archetype"),
+        "universe": data.get("universe"),
+        "voice_language": data.get("voice_language", "pt-br"),
+        "theme": data.get("theme", {}),
+        "spotify_genres": data.get("spotify_genres", []),
+    }
+
+    # Clean None values recursively or just top level?
+    # Top level is fine for now
+    frontmatter = {k: v for k, v in frontmatter.items() if v is not None}
+    
+    # If theme is dict, clean it too
+    if isinstance(frontmatter.get("theme"), dict):
+        frontmatter["theme"] = {k: v for k, v in frontmatter["theme"].items() if v is not None}
+
+    with open(persona_file, "w", encoding="utf-8") as f:
+        f.write("---\n")
+        yaml.dump(frontmatter, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        f.write("---\n")
+        f.write(identity_text)
+
+
+def update_persona(name: str, update_data: UpdatePersonaRequest) -> Optional[PersonaDetail]:
+    """Updates persona attributes and identity."""
+    settings = get_settings()
+    persona_dir = settings.personas_dir / name.lower().replace(" ", "_")
+
+    if not persona_dir.exists():
+        return None
+
+    # Load existing data to merge
+    existing_data = _parse_persona_file(persona_dir)
+    theme = existing_data.get("theme", {})
+    if not isinstance(theme, dict):
+        theme = {}
+    
+    # Merge updates
+    new_data = existing_data.copy()
+    
+    if update_data.display_name is not None:
+        new_data["display_name"] = update_data.display_name
+    if update_data.archetype is not None:
+        new_data["archetype"] = update_data.archetype
+    if update_data.universe is not None:
+        new_data["universe"] = update_data.universe
+    if update_data.voice_language is not None:
+        new_data["voice_language"] = update_data.voice_language
+        
+    # Theme updates
+    if update_data.primary_color:
+        theme["primary"] = update_data.primary_color
+    if update_data.secondary_color:
+        theme["secondary"] = update_data.secondary_color
+        
+    new_data["theme"] = theme
+    
+    # Identity text
+    identity_text = update_data.identity_text if update_data.identity_text is not None else existing_data.get("identity_text", "")
+    
+    # Write back
+    _write_persona_file(persona_dir, new_data, identity_text)
+
+    return get_persona_detail(name)
+
+
+def create_persona(request: CreatePersonaRequest) -> PersonaDetail:
+    """Creates a new persona with directory structure and persona.md."""
+    settings = get_settings()
+    persona_dir = settings.personas_dir / request.name
+
+    if persona_dir.exists():
+        raise ValueError(f"Persona '{request.name}' already exists")
+
+    # Create directory structure
+    persona_dir.mkdir(parents=True)
+    (persona_dir / "rag_docs").mkdir()
+    (persona_dir / "knowledge").mkdir()
+
+    # Build persona data
+    data = {
+        "name": request.name,
+        "display_name": request.display_name,
+        "archetype": request.archetype,
+        "universe": request.universe,
+        "voice_language": request.voice_language,
+        "theme": {
+            "primary": request.primary_color,
+            "secondary": request.secondary_color,
+        },
+        "spotify_genres": request.spotify_genres,
+    }
+
+    identity_text = request.identity_text or f"# {request.display_name}\n\nA new persona."
+
+    _write_persona_file(persona_dir, data, identity_text)
+    logger.info(f"Created persona '{request.name}' at {persona_dir}")
+
+    return get_persona_detail(request.name)
+
+
+def delete_persona(name: str) -> bool:
+    """Deletes a persona and all its files. Returns True if deleted."""
+    if name.lower() == "ahri":
+        return False
+
+    settings = get_settings()
+    persona_dir = settings.personas_dir / name.lower().replace(" ", "_")
+
+    if not persona_dir.exists():
+        return False
+
+    shutil.rmtree(persona_dir)
+    logger.info(f"Deleted persona '{name}' from {persona_dir}")
+
+    # Reset active persona if the deleted one was active
+    global _active_persona
+    if _active_persona == name.lower():
+        _active_persona = "ahri"
+
+    return True

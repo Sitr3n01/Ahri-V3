@@ -88,13 +88,13 @@ export function DependencyGraph({ steps }: DependencyGraphProps) {
 
   return (
     <div className="glass-dark rounded-lg p-4 overflow-x-auto">
-      <h3 className="text-sm font-semibold text-white mb-4">Execution Graph</h3>
+      <h3 className="text-sm font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>Execution Graph</h3>
 
       <div className="flex items-start gap-8">
         {levels.map((level, levelIdx) => (
           <div key={levelIdx} className="flex flex-col gap-4 min-w-[120px]">
             {/* Level label */}
-            <div className="text-[10px] text-gray-500 font-mono text-center mb-2">
+            <div className="text-[10px] font-mono text-center mb-2" style={{ color: 'var(--text-tertiary)' }}>
               Level {levelIdx}
             </div>
 
@@ -104,24 +104,24 @@ export function DependencyGraph({ steps }: DependencyGraphProps) {
               return (
                 <div key={stepIdx} className="relative">
                   {/* Step card */}
-                  <div className="glass rounded-lg p-3 border border-white/20 hover:border-white/40 transition-colors">
+                  <div className="glass rounded-lg p-3 border transition-colors" style={{ borderColor: 'var(--border-medium)' }}>
                     <div className="flex items-center gap-2 mb-1">
                       <div className={`w-6 h-6 rounded-full ${getWorkerColor(step.worker)} flex items-center justify-center text-xs`}>
                         {getWorkerIcon(step.worker)}
                       </div>
-                      <span className="text-xs font-semibold text-white">
+                      <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
                         {step.worker}
                       </span>
                     </div>
 
                     {step.description && (
-                      <p className="text-[10px] text-gray-400 line-clamp-2">
+                      <p className="text-[10px] line-clamp-2" style={{ color: 'var(--text-secondary)' }}>
                         {step.description}
                       </p>
                     )}
 
                     {/* Step number badge */}
-                    <div className="absolute -top-2 -right-2 w-5 h-5 bg-white/20 rounded-full flex items-center justify-center text-[10px] font-mono text-white border border-white/40">
+                    <div className="absolute -top-2 -right-2 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono border" style={{ background: 'var(--surface-elevated)', color: 'var(--text-primary)', borderColor: 'var(--border-medium)' }}>
                       {stepIdx}
                     </div>
                   </div>
@@ -137,12 +137,12 @@ export function DependencyGraph({ steps }: DependencyGraphProps) {
                           y2="1"
                           stroke="currentColor"
                           strokeWidth="1"
-                          className="text-white/30"
+                          style={{ color: 'var(--text-tertiary)' }}
                         />
                         <polygon
                           points="28,0 32,1 28,2"
                           fill="currentColor"
-                          className="text-white/30"
+                          style={{ color: 'var(--text-tertiary)' }}
                         />
                       </svg>
                     </div>
@@ -153,7 +153,7 @@ export function DependencyGraph({ steps }: DependencyGraphProps) {
 
             {/* Parallel indicator */}
             {level.length > 1 && (
-              <div className="text-[10px] text-cyan-400 font-mono text-center -mt-2">
+              <div className="text-[10px] font-mono text-center -mt-2" style={{ color: 'var(--info)' }}>
                 ⚡ Parallel
               </div>
             )}
@@ -162,9 +162,9 @@ export function DependencyGraph({ steps }: DependencyGraphProps) {
       </div>
 
       {/* Legend */}
-      <div className="mt-6 pt-4 border-t border-white/10">
-        <div className="flex items-center gap-4 text-[10px] text-gray-500">
-          <span className="font-semibold text-gray-400">Workers:</span>
+      <div className="mt-6 pt-4" style={{ borderTop: '1px solid var(--glass-border)' }}>
+        <div className="flex items-center gap-4 text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
+          <span className="font-semibold" style={{ color: 'var(--text-secondary)' }}>Workers:</span>
           {Array.from(new Set(steps.map(s => s.worker))).map(worker => (
             <div key={worker} className="flex items-center gap-1.5">
               <div className={`w-3 h-3 rounded-full ${getWorkerColor(worker)}`} />

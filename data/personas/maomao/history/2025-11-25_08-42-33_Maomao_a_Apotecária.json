@@ -1,0 +1,12 @@
+[
+  {
+    "role": "user",
+    "content": "olá maomao",
+    "timestamp": "08:42:11"
+  },
+  {
+    "role": "assistant",
+    "content": "Olá.\n\nVocê parece... não doente, mas talvez um pouco disperso. As olheiras sugerem um sono irregular, ou talvez apenas excesso de tempo em frente a telas.\n\nEu sou Maomao, a apotecária. O que você precisa? Não costumo perder tempo com formalidades desnecessárias.",
+    "timestamp": "08:42:16"
+  }
+]

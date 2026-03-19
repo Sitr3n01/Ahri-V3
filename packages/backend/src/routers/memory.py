@@ -35,6 +35,29 @@ async def get_profile(auth: AuthDep, db: DbDep):
     )
 
 
+@router.post("/profile")
+async def save_profile_endpoint(profile: UserProfileSchema, auth: AuthDep, db: DbDep):
+    """Salva/atualiza o perfil do usuário."""
+    svc = MemoryService(db)
+
+    # Convert schema back to service format
+    data = {
+        "user_profile": {
+            "name": profile.name,
+            "archetype": profile.archetype,
+            "learning_style": profile.learning_style,
+        },
+        "attributes": profile.attributes,
+        "preferences": profile.preferences,
+        "knowledge_tracker": profile.knowledge_tracker,
+        "active_quests": profile.active_quests,
+        "session_log": profile.session_log,
+    }
+
+    await svc.save_profile(data)
+    return {"status": "saved", "profile": profile}
+
+
 @router.post("/save")
 async def save_memory(request: MemorySaveRequest, auth: AuthDep, db: DbDep):
     """Salva uma memória manualmente via [[SAVE:]] tag ou UI."""

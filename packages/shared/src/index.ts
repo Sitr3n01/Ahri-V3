@@ -5,4 +5,5 @@ export * from './types/chat.js';
 export * from './types/agent.js';
 export * from './types/agent-mode.js';
 export * from './types/memory.js';
+export * from './types/llm.js';
 export * from './api-client/index.js';

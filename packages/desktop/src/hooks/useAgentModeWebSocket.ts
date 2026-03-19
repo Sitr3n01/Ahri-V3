@@ -98,11 +98,11 @@ export function useAgentModeWebSocket(
                 worker_type: message.data.worker_type,
                 model: message.data.model,
                 input_data: message.data.input_data,
-                output_data: null,
+                output_data: {},
                 tokens_used: 0,
                 duration_ms: 0,
                 status: 'running',
-                error: null,
+                error: '',
                 created_at: message.data.created_at,
                 completed_at: null
               });

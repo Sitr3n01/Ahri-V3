@@ -1,9 +1,8 @@
 import { create } from 'zustand';
 import type { ChatMessage, SessionSummary } from '@ahri/shared';
+import type { AvailableModel } from '@ahri/shared/types/llm.js';
 import { api } from '@/api/client';
 import { chatWs } from '@/api/websocket';
-
-type LlmModel = 'PRO' | 'GOOGLE' | 'DEEPSEEK' | 'LOCAL';
 
 export interface Attachment {
   type: 'image' | 'video' | 'pdf';
@@ -18,11 +17,13 @@ interface ChatState {
   streamingContent: string;
   activeSessionId: number | null;
   sessions: SessionSummary[];
-  model: LlmModel;
+  model: string;
+  availableModels: AvailableModel[];
   memoryNotifications: string[];
 
   // Actions
-  setModel: (model: LlmModel) => void;
+  setModel: (model: string) => void;
+  fetchAvailableModels: () => Promise<void>;
   fetchSessions: (persona?: string) => Promise<void>;
   loadSession: (id: number) => Promise<void>;
   createSession: (title?: string) => Promise<void>;
@@ -41,9 +42,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
   activeSessionId: null,
   sessions: [],
   model: 'PRO',
+  availableModels: [],
   memoryNotifications: [],
 
   setModel: (model) => set({ model }),
+
+  fetchAvailableModels: async () => {
+    try {
+      const models = await api.getAvailableModels();
+      set({ availableModels: models });
+      // Se o modelo atual não está na lista, usa o primeiro disponível
+      const currentModel = useChatStore.getState().model;
+      if (models.length > 0 && !models.find(m => m.id === currentModel)) {
+        set({ model: models[0].id });
+      }
+    } catch (e) {
+      console.error('Failed to fetch available models:', e);
+    }
+  },
 
   fetchSessions: async (persona) => {
     try {

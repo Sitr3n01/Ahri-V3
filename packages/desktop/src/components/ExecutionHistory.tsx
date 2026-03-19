@@ -12,6 +12,12 @@ interface ExecutionHistoryProps {
   onDeleteExecution?: (executionId: number) => void;
 }
 
+interface StatusStyle {
+  background: string;
+  color: string;
+  borderColor: string;
+}
+
 export function ExecutionHistory({
   executions,
   onSelectExecution,
@@ -66,18 +72,38 @@ export function ExecutionHistory({
       }
     });
 
-  const getStatusColor = (status: string) => {
+  const getStatusStyle = (status: string): StatusStyle => {
     switch (status) {
       case 'completed':
-        return 'bg-green-500/20 text-green-400 border-green-500/30';
+        return {
+          background: 'color-mix(in srgb, var(--success) 20%, transparent)',
+          color: 'var(--success)',
+          borderColor: 'color-mix(in srgb, var(--success) 30%, transparent)',
+        };
       case 'failed':
-        return 'bg-red-500/20 text-red-400 border-red-500/30';
+        return {
+          background: 'color-mix(in srgb, var(--error) 20%, transparent)',
+          color: 'var(--error)',
+          borderColor: 'color-mix(in srgb, var(--error) 30%, transparent)',
+        };
       case 'running':
-        return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+        return {
+          background: 'color-mix(in srgb, var(--info) 20%, transparent)',
+          color: 'var(--info)',
+          borderColor: 'color-mix(in srgb, var(--info) 30%, transparent)',
+        };
       case 'planning':
-        return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30';
+        return {
+          background: 'color-mix(in srgb, var(--warning) 20%, transparent)',
+          color: 'var(--warning)',
+          borderColor: 'color-mix(in srgb, var(--warning) 30%, transparent)',
+        };
       default:
-        return 'bg-gray-500/20 text-gray-400 border-gray-500/30';
+        return {
+          background: 'var(--surface-hover)',
+          color: 'var(--text-secondary)',
+          borderColor: 'var(--glass-border)',
+        };
     }
   };
 
@@ -111,13 +137,16 @@ export function ExecutionHistory({
   return (
     <div className="glass-dark rounded-lg overflow-hidden">
       {/* Header */}
-      <div className="p-4 border-b border-white/10">
+      <div className="p-4" style={{ borderBottom: '1px solid var(--glass-border)' }}>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-white">Execution History</h3>
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Execution History</h3>
           {onClearHistory && executions.length > 0 && (
             <button
               onClick={onClearHistory}
-              className="text-xs text-gray-400 hover:text-red-400 transition-colors"
+              className="text-xs transition-colors hover:opacity-80"
+              style={{ color: 'var(--text-secondary)' }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--error)')}
+              onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
             >
               Clear All
             </button>
@@ -131,10 +160,16 @@ export function ExecutionHistory({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search executions..."
-            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 pl-9 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-white/30 transition-colors"
+            className="w-full rounded-lg px-3 py-2 pl-9 text-sm focus:outline-none transition-colors"
+            style={{
+              background: 'var(--surface-hover)',
+              border: '1px solid var(--glass-border)',
+              color: 'var(--text-primary)',
+            }}
           />
           <svg
-            className="absolute left-3 top-2.5 w-4 h-4 text-gray-500"
+            className="absolute left-3 top-2.5 w-4 h-4"
+            style={{ color: 'var(--text-tertiary)' }}
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -154,11 +189,24 @@ export function ExecutionHistory({
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
+              className="px-3 py-1 rounded-full text-xs font-medium transition-all"
+              style={
                 filter === f
-                  ? 'bg-white/20 text-white'
-                  : 'text-gray-400 hover:text-white hover:bg-white/10'
-              }`}
+                  ? { background: 'var(--surface-elevated)', color: 'var(--text-primary)' }
+                  : { color: 'var(--text-secondary)' }
+              }
+              onMouseEnter={(e) => {
+                if (filter !== f) {
+                  e.currentTarget.style.color = 'var(--text-primary)';
+                  e.currentTarget.style.background = 'var(--surface-active)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (filter !== f) {
+                  e.currentTarget.style.color = 'var(--text-secondary)';
+                  e.currentTarget.style.background = 'transparent';
+                }
+              }}
             >
               {f.charAt(0).toUpperCase() + f.slice(1)}
             </button>
@@ -171,7 +219,12 @@ export function ExecutionHistory({
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-            className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-white/30 transition-colors"
+            className="flex-1 rounded-lg px-2 py-1.5 text-xs focus:outline-none transition-colors"
+            style={{
+              background: 'var(--surface-hover)',
+              border: '1px solid var(--glass-border)',
+              color: 'var(--text-primary)',
+            }}
           >
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>
@@ -184,7 +237,12 @@ export function ExecutionHistory({
             <select
               value={orchestratorFilter}
               onChange={(e) => setOrchestratorFilter(e.target.value)}
-              className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-white/30 transition-colors"
+              className="flex-1 rounded-lg px-2 py-1.5 text-xs focus:outline-none transition-colors"
+              style={{
+                background: 'var(--surface-hover)',
+                border: '1px solid var(--glass-border)',
+                color: 'var(--text-primary)',
+              }}
             >
               <option value="all">All models</option>
               {uniqueOrchestrators.map((model) => (
@@ -200,96 +258,108 @@ export function ExecutionHistory({
       {/* List */}
       <div className="max-h-[400px] overflow-y-auto custom-scrollbar">
         {filteredExecutions.length === 0 ? (
-          <div className="p-8 text-center text-gray-500 text-sm">
+          <div className="p-8 text-center text-sm" style={{ color: 'var(--text-tertiary)' }}>
             {filter === 'all' ? 'No executions yet' : `No ${filter} executions`}
           </div>
         ) : (
-          <div className="divide-y divide-white/5">
-            {filteredExecutions.map((execution) => (
-              <div
-                key={execution.id}
-                className="relative p-4 hover:bg-white/5 transition-colors group"
-              >
-                {/* Delete button */}
-                {onDeleteExecution && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (confirm(`Delete execution "${execution.goal.substring(0, 50)}..."?`)) {
-                        onDeleteExecution(execution.id);
-                      }
-                    }}
-                    className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-red-400"
-                    title="Delete execution"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                  </button>
-                )}
-
-                <button
-                  onClick={() => onSelectExecution(execution)}
-                  className="w-full text-left"
+          <div className="divide-y" style={{ '--tw-divide-opacity': '1', borderColor: 'var(--surface-hover)' } as React.CSSProperties}>
+            {filteredExecutions.map((execution) => {
+              const statusStyle = getStatusStyle(execution.status);
+              return (
+                <div
+                  key={execution.id}
+                  className="relative p-4 transition-colors group"
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-hover)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                 >
-                  <div className="flex items-start gap-3">
-                  {/* Status badge */}
-                  <div
-                    className={`mt-0.5 px-2 py-1 rounded border text-xs font-mono ${getStatusColor(
-                      execution.status
-                    )}`}
+                  {/* Delete button */}
+                  {onDeleteExecution && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirm(`Delete execution "${execution.goal.substring(0, 50)}..."?`)) {
+                          onDeleteExecution(execution.id);
+                        }
+                      }}
+                      className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity"
+                      style={{ color: 'var(--text-tertiary)' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--error)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-tertiary)')}
+                      title="Delete execution"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => onSelectExecution(execution)}
+                    className="w-full text-left"
                   >
-                    {getStatusIcon(execution.status)}
-                  </div>
-
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-white font-medium line-clamp-2 group-hover:text-cyan-400 transition-colors">
-                      {execution.goal}
-                    </p>
-
-                    <div className="mt-2 flex items-center gap-3 text-xs text-gray-500">
-                      <span>{formatDate(execution.created_at)}</span>
-                      <span>•</span>
-                      <span>{execution.worker_tasks?.length || 0} workers</span>
-                      {execution.completed_at && (
-                        <>
-                          <span>•</span>
-                          <span>
-                            {Math.round(
-                              (new Date(execution.completed_at).getTime() -
-                                new Date(execution.created_at).getTime()) /
-                                1000
-                            )}s
-                          </span>
-                        </>
-                      )}
+                    <div className="flex items-start gap-3">
+                    {/* Status badge */}
+                    <div
+                      className="mt-0.5 px-2 py-1 rounded border text-xs font-mono"
+                      style={{
+                        background: statusStyle.background,
+                        color: statusStyle.color,
+                        borderColor: statusStyle.borderColor,
+                      }}
+                    >
+                      {getStatusIcon(execution.status)}
                     </div>
 
-                    {/* Model */}
-                    <div className="mt-1 text-[10px] text-gray-600 font-mono">
-                      {execution.orchestrator_model}
-                    </div>
-                  </div>
+                    {/* Content */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium line-clamp-2 transition-colors" style={{ color: 'var(--text-primary)' }}>
+                        {execution.goal}
+                      </p>
 
-                  {/* Arrow */}
-                  <svg
-                    className="w-4 h-4 text-gray-600 group-hover:text-white transition-colors flex-shrink-0 mt-1"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 5l7 7-7 7"
-                    />
-                  </svg>
-                </div>
-              </button>
-            </div>
-            ))}
+                      <div className="mt-2 flex items-center gap-3 text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                        <span>{formatDate(execution.created_at)}</span>
+                        <span>•</span>
+                        <span>{execution.worker_tasks?.length || 0} workers</span>
+                        {execution.completed_at && (
+                          <>
+                            <span>•</span>
+                            <span>
+                              {Math.round(
+                                (new Date(execution.completed_at).getTime() -
+                                  new Date(execution.created_at).getTime()) /
+                                  1000
+                              )}s
+                            </span>
+                          </>
+                        )}
+                      </div>
+
+                      {/* Model */}
+                      <div className="mt-1 text-[10px] font-mono" style={{ color: 'var(--text-tertiary)' }}>
+                        {execution.orchestrator_model}
+                      </div>
+                    </div>
+
+                    {/* Arrow */}
+                    <svg
+                      className="w-4 h-4 transition-colors flex-shrink-0 mt-1"
+                      style={{ color: 'var(--text-tertiary)' }}
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 5l7 7-7 7"
+                      />
+                    </svg>
+                  </div>
+                </button>
+              </div>
+              );
+            })}
           </div>
         )}
       </div>

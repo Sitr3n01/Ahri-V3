@@ -64,17 +64,17 @@ export function ImageUpload({
 
   return (
     <div>
-      <label className="block text-xs text-agent-text-tertiary font-mono mb-2">
+      <label className="block text-xs font-mono mb-2" style={{ color: 'var(--text-tertiary)' }}>
         {label}
       </label>
       <div className="flex items-center gap-4">
         {/* Preview */}
         <div
           className={`
-            flex-shrink-0 overflow-hidden border-2 border-agent-border
+            flex-shrink-0 overflow-hidden border-2
             ${previewShape === 'circle' ? 'rounded-full' : 'rounded-sm'}
           `}
-          style={{ width: previewSize.width, height: previewSize.height }}
+          style={{ width: previewSize.width, height: previewSize.height, borderColor: 'var(--glass-border)' }}
         >
           <img
             src={`/${currentImage}`}
@@ -88,15 +88,18 @@ export function ImageUpload({
           className={`
             flex-1 border-2 border-dashed rounded-sm p-4 transition-all cursor-pointer
             ${isDragging
-              ? 'border-agent-accent bg-agent-accent/10'
-              : 'border-agent-border hover:border-agent-accent/50 hover:bg-agent-bg-tertiary'
+              ? 'border-purple-400 bg-purple-400/10'
+              : ''
             }
           `}
+          style={!isDragging ? { borderColor: 'var(--glass-border)' } : undefined}
           onDragEnter={handleDragEnter}
           onDragLeave={handleDragLeave}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
           onClick={handleClick}
+          onMouseEnter={(e) => { if (!isDragging) { e.currentTarget.style.borderColor = 'var(--border-medium)'; e.currentTarget.style.background = 'var(--surface-hover)'; } }}
+          onMouseLeave={(e) => { if (!isDragging) { e.currentTarget.style.borderColor = 'var(--glass-border)'; e.currentTarget.style.background = 'transparent'; } }}
         >
           <input
             ref={fileInputRef}
@@ -107,7 +110,8 @@ export function ImageUpload({
           />
           <div className="text-center">
             <svg
-              className="mx-auto mb-2 text-agent-text-tertiary"
+              className="mx-auto mb-2"
+              style={{ color: 'var(--text-tertiary)' }}
               width="24"
               height="24"
               viewBox="0 0 24 24"
@@ -119,16 +123,16 @@ export function ImageUpload({
               <polyline points="17 8 12 3 7 8" />
               <line x1="12" y1="3" x2="12" y2="15" />
             </svg>
-            <p className="text-xs text-agent-text-secondary font-mono">
+            <p className="text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>
               {isDragging ? 'Drop image here' : 'Click or drag image'}
             </p>
-            <p className="text-xs text-agent-text-tertiary font-mono mt-1">
+            <p className="text-xs font-mono mt-1" style={{ color: 'var(--text-tertiary)' }}>
               PNG, JPG, WEBP
             </p>
           </div>
         </div>
       </div>
-      <p className="text-xs text-agent-text-tertiary mt-1 font-mono">
+      <p className="text-xs mt-1 font-mono" style={{ color: 'var(--text-tertiary)' }}>
         Current: {currentImage}
       </p>
     </div>
