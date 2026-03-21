@@ -1,12 +1,16 @@
 """
-Memory: perfil do usuário, aprender, esquecer.
+Memory: perfil do usuário, aprender, esquecer, CRUD de memórias RAG.
 """
 import logging
+from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from src.dependencies import AuthDep, DbDep
-from src.models.schemas import UserProfileSchema, MemorySaveRequest, MemoryLearnRequest, MemoryForgetRequest
+from src.models.schemas import (
+    UserProfileSchema, MemorySaveRequest, MemoryLearnRequest,
+    MemoryForgetRequest, MemoryUpdateRequest, MemoryItem,
+)
 from src.services.memory_service import MemoryService
 from src.services.persona_service import get_active_persona
 from src.services.vector_service import get_vector_service
@@ -93,14 +97,13 @@ async def learn_topic(request: MemoryLearnRequest, auth: AuthDep, db: DbDep):
 
 @router.post("/forget")
 async def forget_topic(request: MemoryForgetRequest, auth: AuthDep, db: DbDep):
-    """Comando /esquecer - remove conhecimento do RAG."""
+    """Comando /esquecer - remove conhecimento dinâmico do RAG."""
     persona = get_active_persona()
 
     try:
         vector_svc = get_vector_service(persona)
-        # Busca documentos que correspondem ao tópico e remove
         results = vector_svc.collection.get(
-            where={"source": "dynamic"},
+            where={"type": "dynamic_knowledge"},
             include=["documents", "metadatas"],
         )
 
@@ -109,9 +112,9 @@ async def forget_topic(request: MemoryForgetRequest, auth: AuthDep, db: DbDep):
             for i, doc_id in enumerate(results["ids"]):
                 metadata = results["metadatas"][i] if results["metadatas"] else {}
                 doc_text = results["documents"][i] if results["documents"] else ""
-                title = metadata.get("title", "")
+                filename = metadata.get("filename", "")
 
-                if request.topic.lower() in title.lower() or request.topic.lower() in doc_text.lower():
+                if request.topic.lower() in filename.lower() or request.topic.lower() in doc_text.lower():
                     vector_svc.collection.delete(ids=[doc_id])
                     deleted += 1
 
@@ -119,3 +122,56 @@ async def forget_topic(request: MemoryForgetRequest, auth: AuthDep, db: DbDep):
     except Exception as e:
         logger.error(f"Forget error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to forget: {e}")
+
+
+# =============================================================================
+# RAG Memory CRUD
+# =============================================================================
+
+@router.get("/list")
+async def list_memories(
+    auth: AuthDep,
+    source_type: Optional[str] = Query(None, description="Filter: static_lore, dynamic_knowledge, chat_history"),
+):
+    """Lista memórias RAG da persona ativa."""
+    persona = get_active_persona()
+    vector_svc = get_vector_service(persona)
+    memories = vector_svc.list_memories(source_type=source_type)
+    return {
+        "memories": [MemoryItem(**m) for m in memories],
+        "total": len(memories),
+        "persona": persona,
+    }
+
+
+@router.get("/{memory_id}")
+async def get_memory(memory_id: str, auth: AuthDep):
+    """Retorna detalhes de uma memória específica."""
+    persona = get_active_persona()
+    vector_svc = get_vector_service(persona)
+    memory = vector_svc.get_memory(memory_id)
+    if not memory:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return memory
+
+
+@router.put("/{memory_id}")
+async def update_memory(memory_id: str, request: MemoryUpdateRequest, auth: AuthDep):
+    """Edita conteúdo de uma memória existente."""
+    persona = get_active_persona()
+    vector_svc = get_vector_service(persona)
+    success = vector_svc.update_memory(memory_id, request.content)
+    if not success:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return {"status": "updated", "id": memory_id}
+
+
+@router.delete("/{memory_id}")
+async def delete_memory(memory_id: str, auth: AuthDep):
+    """Deleta uma memória específica."""
+    persona = get_active_persona()
+    vector_svc = get_vector_service(persona)
+    success = vector_svc.delete_memory(memory_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return {"status": "deleted", "id": memory_id}

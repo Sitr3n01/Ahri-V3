@@ -89,7 +89,12 @@ export function AgentPanel() {
   const hasCompleted = tasks.some((t) => t.status === 'completed' || t.status === 'failed');
 
   return (
-    <aside className="w-80 h-full glass-dark flex flex-col border-l" style={{ borderColor: 'var(--glass-border)' }}>
+    <aside className="w-80 h-full flex flex-col border-l relative z-10" style={{ 
+      borderColor: 'var(--glass-border)',
+      background: 'var(--sidebar-bg)',
+      backdropFilter: 'blur(24px) saturate(150%)',
+      boxShadow: '-8px 0 32px rgba(0, 0, 0, 0.15)'
+    }}>
       {/* Header */}
       <div className="p-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--glass-border)' }}>
         <div className="flex items-center gap-2">

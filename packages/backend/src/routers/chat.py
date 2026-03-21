@@ -13,7 +13,7 @@ from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from jose import JWTError, jwt
-import google.generativeai as genai
+from src.core.llm_clients import GeminiClient
 
 from src.config import get_settings
 from src.dependencies import AuthDep, DbDep, SettingsDep
@@ -28,6 +28,7 @@ from src.core.save_tag_parser import extract_save_tags, extract_agent_tags, clea
 from src.core.memory_analyzer import analyze_incremental
 from src.services.vector_service import get_vector_service
 from src.services.agent_service import get_permission_level, execute_task as execute_agent_task
+from src.services.compaction_service import CompactionService
 
 logger = logging.getLogger("ahri.router.chat")
 
@@ -35,7 +36,7 @@ router = APIRouter()
 
 
 def _upload_file_to_gemini(file_data_b64: str, mime_type: str, filename: str = "temp_file", api_key: str = ""):
-    """Upload file to Gemini File API (usado para video e PDF)."""
+    """Upload file to Gemini File API via google-genai SDK (usado para video e PDF)."""
     try:
         logger.info(f"Uploading file: {filename} ({mime_type})")
         suffix = "." + mime_type.split("/")[-1]
@@ -45,17 +46,15 @@ def _upload_file_to_gemini(file_data_b64: str, mime_type: str, filename: str = "
             tmp.write(base64.b64decode(file_data_b64))
             tmp_path = tmp.name
 
-        # Upload via Gemini File API
-        if api_key:
-            genai.configure(api_key=api_key)
-
-        uploaded_file = genai.upload_file(tmp_path, mime_type=mime_type)
+        # Upload via novo SDK (per-instance client, thread-safe)
+        client = GeminiClient(api_key=api_key, model_name="")
+        uploaded_file = client.upload_file(tmp_path, mime_type)
         os.remove(tmp_path)
 
         # Aguarda processamento
         while uploaded_file.state.name == "PROCESSING":
             time.sleep(1)
-            uploaded_file = genai.get_file(uploaded_file.name)
+            uploaded_file = client.get_file(uploaded_file.name)
 
         if uploaded_file.state.name == "FAILED":
             logger.error(f"File upload failed: {uploaded_file.name}")
@@ -69,7 +68,7 @@ def _upload_file_to_gemini(file_data_b64: str, mime_type: str, filename: str = "
         return None
 
 
-async def _build_context(db, persona_name: str, model: str) -> tuple[str, list[dict]]:
+async def _build_context(db, persona_name: str, model: str, compacted_context: str = "") -> tuple[str, list[dict]]:
     """Constrói system prompt e carrega contexto."""
     mem_svc = MemoryService(db)
 
@@ -95,6 +94,7 @@ async def _build_context(db, persona_name: str, model: str) -> tuple[str, list[d
         social_graph=social_graph,
         model_name=model,
         enable_agent=True,
+        compacted_context=compacted_context,
     )
 
     return system_prompt, profile
@@ -174,10 +174,7 @@ async def send_message(
     llm_svc = get_llm_service()
     llm_svc.set_mode(request.model)
 
-    # 2. Constrói system prompt com contexto completo
-    system_prompt, profile = await _build_context(db, persona_name, request.model)
-
-    # 3. Busca/cria sessão ativa
+    # 2. Busca/cria sessão ativa
     sessions = await session_svc.list_sessions(persona_name)
     if sessions:
         session_id = sessions[0]["id"]
@@ -188,7 +185,27 @@ async def send_message(
         session_id = new_session["id"]
         history = []
 
-    # 4. Salva mensagem do usuário
+    # 3. Context compaction
+    compacted_context = ""
+    compaction_svc = CompactionService()
+    if compaction_svc.should_compact(history):
+        existing_summary = await session_svc.get_session_summary(session_id)
+        loop = asyncio.get_running_loop()
+        summary, history = await loop.run_in_executor(
+            None, compaction_svc.compact_history, history, existing_summary
+        )
+        if summary != existing_summary:
+            await session_svc.update_session_summary(
+                session_id, summary, len(history)
+            )
+        compacted_context = summary
+    else:
+        compacted_context = await session_svc.get_session_summary(session_id)
+
+    # 4. Constrói system prompt com contexto completo
+    system_prompt, profile = await _build_context(db, persona_name, request.model, compacted_context)
+
+    # 5. Salva mensagem do usuário
     await session_svc.add_message(
         session_id=session_id,
         role="user",
@@ -232,9 +249,9 @@ async def send_message(
             system_prompt=system_prompt,
             history=history,
             images=request.images if request.images else None,
-            video=None, # Video handled via uploaded_files
-            pdfs=None,  # PDFs handled via uploaded_files
             uploaded_files=uploaded_files if uploaded_files else None,
+            reasoning_level=request.reasoning_level,
+            enable_thinking=request.enable_thinking,
         ):
             full_response += chunk
     except Exception as e:
@@ -312,10 +329,13 @@ async def chat_websocket(websocket: WebSocket):
 
             if msg_type == "message":
                 message = data.get("message", "")
-                model = data.get("model", "PRO")
+                model = data.get("model", "LITE")
                 images = data.get("images", [])
                 video = data.get("video")
                 pdfs = data.get("pdfs", [])
+                mode = data.get("mode", "default")
+                reasoning_level = data.get("reasoning_level")
+                enable_thinking = data.get("enable_thinking", False)
 
                 if not message:
                     await websocket.send_json({"type": "error", "detail": "Empty message"})
@@ -328,8 +348,6 @@ async def chat_websocket(websocket: WebSocket):
                 # Obtem db session via import direto
                 from src.models.database import get_db
                 async for db in get_db():
-                    system_prompt, profile = await _build_context(db, persona_name, model)
-
                     session_svc = SessionService(db)
                     sessions = await session_svc.list_sessions(persona_name)
                     if sessions:
@@ -340,6 +358,25 @@ async def chat_websocket(websocket: WebSocket):
                         new_session = await session_svc.create_session(persona_name=persona_name)
                         session_id = new_session["id"]
                         history = []
+
+                    # Compaction
+                    compacted_context = ""
+                    compaction_svc = CompactionService()
+                    if compaction_svc.should_compact(history):
+                        existing_summary = await session_svc.get_session_summary(session_id)
+                        ws_loop = asyncio.get_running_loop()
+                        summary, history = await ws_loop.run_in_executor(
+                            None, compaction_svc.compact_history, history, existing_summary
+                        )
+                        if summary != existing_summary:
+                            await session_svc.update_session_summary(
+                                session_id, summary, len(history)
+                            )
+                        compacted_context = summary
+                    else:
+                        compacted_context = await session_svc.get_session_summary(session_id)
+
+                    system_prompt, profile = await _build_context(db, persona_name, model, compacted_context)
 
                     # Salva mensagem do usuário
                     await session_svc.add_message(
@@ -371,20 +408,6 @@ async def chat_websocket(websocket: WebSocket):
                     # Stream resposta
                     full_response = ""
 
-                    def _generate():
-                        nonlocal full_response
-                        for chunk in llm_svc.generate_response(
-                            message=message,
-                            system_prompt=system_prompt,
-                            history=history,
-                            images=images if images else None,
-                            video=video,
-                            pdfs=pdfs,
-                            uploaded_files=uploaded_files if uploaded_files else None,
-                        ):
-                            full_response += chunk
-                            yield chunk
-
                     # LLM streaming é síncrono - roda em thread
                     loop = asyncio.get_event_loop()
 
@@ -395,6 +418,9 @@ async def chat_websocket(websocket: WebSocket):
                             system_prompt=system_prompt,
                             history=history,
                             images=images if images else None,
+                            uploaded_files=uploaded_files if uploaded_files else None,
+                            reasoning_level=reasoning_level,
+                            enable_thinking=enable_thinking,
                         ):
                             full_response += chunk
                             # Usa thread-safe callback

@@ -35,7 +35,7 @@ def _get_rest_client() -> Optional[GeminiClient]:
     key = settings.memory_key
     if not key:
         return None
-    return GeminiClient(key, "gemma-3-27b-it")
+    return GeminiClient(key, "gemini-3.1-flash-lite")
 
 
 def analyze_incremental(user_msg: str, ai_msg: str, current_profile: dict) -> Optional[dict]:

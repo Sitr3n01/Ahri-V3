@@ -112,7 +112,9 @@ class ChatRequest(BaseModel):
     video: Optional[FileAttachment] = None
     pdfs: list[FileAttachment] = []
     mode: str = "default"                # default, web_search, lore_search
-    model: str = "PRO"                   # PRO, GOOGLE, DEEPSEEK, LOCAL
+    model: str = "LITE"                   # LITE, DEEPSEEK, LOCAL (FLASH é interno dos workers)
+    reasoning_level: str = "medium"      # off/low/medium/high
+    enable_thinking: bool = False        # Ollama toggle
 
 
 class ChatResponse(BaseModel):
@@ -173,6 +175,18 @@ class MemoryForgetRequest(BaseModel):
     topic: str
 
 
+class MemoryUpdateRequest(BaseModel):
+    content: str
+
+
+class MemoryItem(BaseModel):
+    id: str
+    content: str
+    type: str = "unknown"
+    filename: str = ""
+    source: str = ""
+
+
 # =============================================================================
 # Settings
 # =============================================================================
@@ -202,13 +216,29 @@ class SettingsSchema(BaseModel):
     
     google_ai_studio_api_key: str = ""
     google_ai_studio_tpm_limit: int = 15000
-    
+
     deepinfra_api_key: str = ""
     gh_token: str = ""
     gist_id: str = ""
 
-    google_oauth_client_id: str = ""
-    google_oauth_client_secret: str = ""
+    # Agent Mode v2
+    agent_mode_rpm_limit: int = 15
+    agent_mode_tpm_limit: int = 250000
+    agent_mode_max_parallel: int = 10
+    agent_mode_local_model: str = "qwen3:8b"
+    agent_mode_api_model: str = "gemini-3.1-flash-lite"
+
+    # Compaction
+    compaction_threshold: int = 30
+    compaction_recent_window: int = 15
+
+    # Agent Mode API Keys (round-robin)
+    agent_api_key_1: str = ""
+    agent_api_key_2: str = ""
+    agent_api_key_3: str = ""
+    agent_api_key_4: str = ""
+    agent_api_key_5: str = ""
+
 
 
 class UpdateSettingsRequest(BaseModel):
@@ -216,23 +246,16 @@ class UpdateSettingsRequest(BaseModel):
 
 
 # =============================================================================
-# OAuth & Models
+# Models
 # =============================================================================
 class AvailableModelSchema(BaseModel):
     id: str
     display_name: str
-    provider: str  # google_oauth, google_apikey, openrouter, ollama
+    provider: str  # google_apikey, openrouter, ollama
     color: str = "#8B5CF6"
     description: str = ""
     input_token_limit: int = 0
     output_token_limit: int = 0
-
-
-class OAuthStatusResponse(BaseModel):
-    configured: bool = False
-    connected: bool = False
-    email: Optional[str] = None
-    models: list[AvailableModelSchema] = []
 
 
 # =============================================================================
@@ -307,6 +330,7 @@ class AgentWorkerType(str, Enum):
     SHELL = "Shell"
     BROWSER = "Browser"
     ROUTER = "Router"
+    SEARCH = "Search"
 
 
 class AgentWorkerTaskSchema(BaseModel):
@@ -339,7 +363,12 @@ class AgentExecutionSchema(BaseModel):
 
 class AgentModeExecuteRequest(BaseModel):
     goal: str
-    orchestrator_model: str = "gemini-2.5-flash"
+    orchestrator_model: str = "gemini-3.1-flash-lite"
+    working_directory: Optional[str] = None  # Project directory context
+    reasoning_level: str = "medium"          # off/low/medium/high (Gemini thinking budget)
+    enable_thinking: bool = False            # Qwen/Ollama thinking toggle
+    internet_search_enabled: bool = False    # Enable web search worker
+    images: list[str] = []                   # Base64 images for vision pre-pass
 
 
 # =============================================================================

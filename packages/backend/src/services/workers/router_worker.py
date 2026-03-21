@@ -19,6 +19,14 @@ from src.services.workers.base_worker import BaseWorker
 class RouterWorker(BaseWorker):
     """Worker for intelligent task routing and classification."""
 
+    ROLE_PROMPT = (
+        "[ROLE: Task Router & Classifier]\n"
+        "You classify tasks and recommend the optimal worker(s) to handle them.\n"
+        "Consider task complexity, required capabilities, and execution order.\n"
+        "For multi-step tasks, identify dependencies between steps.\n"
+        "Output: JSON with 'recommended_workers', 'complexity', and 'reasoning' fields."
+    )
+
     # Worker capabilities mapping
     WORKER_CAPABILITIES = {
         "RAG": {
@@ -62,7 +70,7 @@ class RouterWorker(BaseWorker):
         super().__init__(
             llm_service=llm_service,
             worker_type="Router",
-            default_model="GOOGLE"
+            default_model="LITE"
         )
 
     async def execute(
@@ -80,6 +88,8 @@ class RouterWorker(BaseWorker):
             "context": "additional context" (optional)
         }
         """
+        import time
+        start_time = time.time()
         task = await self._create_task_record(db, execution_id, input_data)
 
         try:
@@ -103,24 +113,18 @@ class RouterWorker(BaseWorker):
                 db
             )
 
-            task.output_data = {
+            output = {
                 "classification": classification,
                 "selected_workers": selected_workers,
                 "complexity": complexity,
                 "execution_plan": execution_plan,
                 "routing_confidence": classification.get("confidence", 0.0)
             }
-            task.status = "completed"
-            await db.commit()
-            await db.refresh(task)
-            return task
+            tokens = self._estimate_tokens(str(output))
+            return await self._complete_task(db, task, output, tokens, start_time)
 
         except Exception as e:
-            task.status = "failed"
-            task.error = str(e)
-            await db.commit()
-            await db.refresh(task)
-            return task
+            return await self._fail_task(db, task, str(e), start_time)
 
     async def _classify_task(
         self,
@@ -165,7 +169,7 @@ Retorne em JSON:
         # Fallback to Gemma 3 4B for now
         response = await self._call_llm(
             prompt=prompt,
-            model="GOOGLE",
+            model=self.default_model,
             schema={
                 "type": "object",
                 "properties": {

@@ -3,14 +3,17 @@ Agent Mode Router - Orchestrated multi-agent task execution endpoints.
 
 Provides REST and WebSocket APIs for submitting tasks, checking status,
 and streaming real-time updates from workers.
+
+V2: Background execution (non-blocking), dual rate limiting (TPM+RPM).
 """
+import asyncio
 import logging
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models.database import get_db
+from ..models.database import get_db, AgentExecution
 from ..models.schemas import (
     AgentModeExecuteRequest,
     AgentExecutionSchema,
@@ -19,13 +22,124 @@ from ..models.schemas import (
 )
 from ..dependencies import get_llm_service, get_vector_service
 from ..services.orchestrator_service import OrchestratorService
-from ..services.tpm_manager import TPMManager
+from ..services.tpm_manager import TPMManager, AgentKeyRotator
+from ..config import get_settings
 
 logger = logging.getLogger("ahri.agent_mode")
 router = APIRouter(prefix="/agent-mode", tags=["agent-mode"])
 
-# Global TPM manager (shared across requests)
-tpm_manager = TPMManager(limit_tpm=15000)
+# Global TPM+RPM manager (shared across requests, thread-safe)
+_settings = get_settings()
+tpm_manager = TPMManager(
+    limit_tpm=_settings.agent_mode_tpm_limit,
+    limit_rpm=_settings.agent_mode_rpm_limit
+)
+
+# Global key rotator for round-robin across multiple API keys
+key_rotator = AgentKeyRotator(
+    keys=_settings.agent_api_keys,
+    rpm_per_key=_settings.agent_mode_rpm_limit
+)
+
+# Track background tasks to prevent garbage collection
+_background_tasks: dict[int, asyncio.Task] = {}
+
+
+def _vision_prepass_sync(images: list[str]) -> str:
+    """
+    Analyze images with Gemini Flash and return text descriptions.
+    Synchronous — meant to run in executor from async context.
+
+    This lets text-only models (flash-lite workers) understand image content.
+    Uses vision key rotation for rate limit distribution.
+    """
+    import base64
+    import io
+    from PIL import Image
+    from src.core.llm_clients import GeminiClient
+
+    settings = get_settings()
+    vision_keys = settings.vision_keys
+    if not vision_keys:
+        return ""
+
+    descriptions = []
+    for idx, img_b64 in enumerate(images):
+        try:
+            key = vision_keys[idx % len(vision_keys)]
+            client = GeminiClient(api_key=key, model_name="gemini-2.5-flash")
+
+            img_bytes = base64.b64decode(img_b64)
+            img = Image.open(io.BytesIO(img_bytes))
+
+            response = client.generate_content_sync(contents=[
+                "Descreva esta imagem em detalhes para que outro modelo de IA (sem visão) "
+                "possa entender completamente o conteúdo. Inclua: objetos, texto visível, "
+                "cores, layout, pessoas, e qualquer informação relevante. Seja preciso e conciso.",
+                img,
+            ])
+            descriptions.append(f"[Imagem {idx+1}]: {response.text}")
+        except Exception as e:
+            logger.error(f"[Vision Pre-pass] Failed to analyze image {idx+1}: {e}")
+            descriptions.append(f"[Imagem {idx+1}]: (falha na análise: {e})")
+
+    return "\n".join(descriptions)
+
+
+async def _run_orchestration(
+    execution_id: int,
+    goal: str,
+    orchestrator_model: str,
+    reasoning_level: str = "medium",
+    enable_thinking: bool = False,
+    internet_search_enabled: bool = False,
+    images: list[str] | None = None,
+):
+    """Run orchestration in background. Uses its own DB session."""
+    from ..models.database import async_session_factory
+
+    llm_service = get_llm_service()
+    vector_service = get_vector_service()
+    orchestrator = OrchestratorService(
+        llm_service, vector_service, tpm_manager, key_rotator=key_rotator
+    )
+
+    # Vision pre-pass: analyze images with Gemini Flash, inject descriptions into goal
+    enriched_goal = goal
+    if images:
+        logger.info(f"[AgentMode] Vision pre-pass for {len(images)} image(s)")
+        loop = asyncio.get_running_loop()
+        image_context = await loop.run_in_executor(None, _vision_prepass_sync, images)
+        if image_context:
+            enriched_goal = f"{goal}\n\n[CONTEXTO VISUAL - Análise das imagens enviadas]\n{image_context}"
+            logger.info(f"[AgentMode] Vision context injected ({len(image_context)} chars)")
+
+    async with async_session_factory() as db:
+        try:
+            await orchestrator.execute_task(
+                db=db,
+                goal=enriched_goal,
+                orchestrator_model=orchestrator_model,
+                execution_id=execution_id,
+                reasoning_level=reasoning_level,
+                enable_thinking=enable_thinking,
+                internet_search_enabled=internet_search_enabled,
+            )
+        except Exception as e:
+            logger.error(f"[AgentMode] Background execution {execution_id} failed: {e}")
+            # Mark as failed in DB
+            from sqlalchemy import select
+            stmt = select(AgentExecution).where(AgentExecution.id == execution_id)
+            result = await db.execute(stmt)
+            execution = result.scalar_one_or_none()
+            if execution:
+                from datetime import datetime
+                execution.status = AgentExecutionStatus.FAILED
+                execution.error = str(e)
+                execution.completed_at = datetime.utcnow()
+                await db.commit()
+        finally:
+            _background_tasks.pop(execution_id, None)
 
 
 @router.post("/execute", response_model=AgentExecutionSchema)
@@ -38,38 +152,53 @@ async def execute_task(
     """
     Submit a new agent mode task for execution.
 
-    The orchestrator will:
-    1. Plan task decomposition
-    2. Delegate to specialized workers
-    3. Synthesize final result
-
-    Returns immediately with execution record (status=planning).
-    Poll /agent-mode/{execution_id}/status for updates.
+    Returns IMMEDIATELY with execution record (status=planning).
+    Orchestration runs in background via asyncio.create_task().
+    Poll /agent-mode/{execution_id}/status or use WebSocket for updates.
     """
     try:
-        orchestrator = OrchestratorService(llm_service, vector_service, tpm_manager)
-        execution = await orchestrator.execute_task(
-            db=db,
+        # Step 1: Create execution record immediately
+        execution = AgentExecution(
             goal=request.goal,
-            orchestrator_model=request.orchestrator_model
+            orchestrator_model=request.orchestrator_model,
+            status=AgentExecutionStatus.PLANNING
         )
+        db.add(execution)
+        await db.commit()
+        await db.refresh(execution)
 
-        # Convert to schema
+        logger.info(f"[AgentMode] Created execution #{execution.id}, launching background task")
+
+        # Step 2: Launch orchestration in background (non-blocking)
+        task = asyncio.create_task(
+            _run_orchestration(
+                execution.id,
+                request.goal,
+                request.orchestrator_model,
+                reasoning_level=getattr(request, 'reasoning_level', 'medium'),
+                enable_thinking=getattr(request, 'enable_thinking', False),
+                internet_search_enabled=getattr(request, 'internet_search_enabled', False),
+                images=request.images if request.images else None,
+            )
+        )
+        _background_tasks[execution.id] = task
+
+        # Step 3: Return immediately
         return AgentExecutionSchema(
             id=execution.id,
             goal=execution.goal,
             orchestrator_model=execution.orchestrator_model,
             status=execution.status,
-            plan=execution.plan,
-            result=execution.result,
-            error=execution.error,
+            plan=execution.plan or {},
+            result=execution.result or "",
+            error=execution.error or "",
             created_at=execution.created_at,
             completed_at=execution.completed_at,
-            worker_tasks=[]  # Loaded separately via get_status
+            worker_tasks=[]
         )
 
     except Exception as e:
-        logger.error(f"[AgentMode] Execution failed: {e}")
+        logger.error(f"[AgentMode] Failed to create execution: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -279,7 +408,7 @@ async def websocket_execution_stream(
                                 }
                             })
 
-                    # Send TPM status
+                    # Send TPM + RPM status
                     tpm_status = tpm_manager.get_status()
                     await websocket.send_json({
                         "type": "tpm_status",
@@ -287,7 +416,11 @@ async def websocket_execution_stream(
                             "tokens_used_window": tpm_status["tokens_used_window"],
                             "tokens_remaining": tpm_status["tokens_remaining"],
                             "limit_tpm": tpm_status["limit_tpm"],
-                            "utilization_percent": (tpm_status["tokens_used_window"] / tpm_status["limit_tpm"]) * 100
+                            "utilization_percent": tpm_status["utilization_percent"],
+                            "requests_used": tpm_status["requests_used"],
+                            "requests_remaining": tpm_status["requests_remaining"],
+                            "limit_rpm": tpm_status["limit_rpm"],
+                            "rpm_utilization_percent": tpm_status["rpm_utilization_percent"],
                         }
                     })
 

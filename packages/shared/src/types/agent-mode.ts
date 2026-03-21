@@ -17,7 +17,8 @@ export type AgentWorkerType =
   | 'Vision'
   | 'Shell'
   | 'Browser'
-  | 'Router';
+  | 'Router'
+  | 'Search';
 
 // Re-export AgentTaskStatus for convenience
 export type { AgentTaskStatus };
@@ -59,5 +60,26 @@ export interface AgentExecution {
 
 export interface AgentModeExecuteRequest {
   goal: string;
-  orchestrator_model?: string;  // default: "gemini-2.5-flash"
+  orchestrator_model?: string;  // default: "gemini-3.1-flash-lite"
+  working_directory?: string;   // Project directory context
+  reasoning_level?: GeminiReasoningLevel;  // Gemini thinking budget
+  enable_thinking?: boolean;               // Qwen/Ollama thinking toggle
+  internet_search_enabled?: boolean;       // Enable Search worker
+  images?: string[];                       // Base64 images for vision pre-pass
 }
+
+export interface TPMStatus {
+  tokensUsed: number;
+  tokensRemaining: number;
+  limitTPM: number;
+  utilizationPercent: number;
+  // RPM (requests per minute)
+  requestsUsed: number;
+  requestsRemaining: number;
+  limitRPM: number;
+  rpmUtilizationPercent: number;
+}
+
+export type AgentModelId = 'qwen-3.5-local' | 'gemini-flash-lite';
+
+export type GeminiReasoningLevel = 'off' | 'low' | 'medium' | 'high';

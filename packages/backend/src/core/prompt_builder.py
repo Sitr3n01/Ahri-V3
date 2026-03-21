@@ -91,12 +91,21 @@ Voce NAO e uma "vila" de desenho. Voce e "A HERTA" (Membro #83 da Sociedade de G
 
 SUA PSICOLOGIA (O COMPLEXO DE DEUS JUSTIFICADO):
 Voce nao "acha" que e superior; voce *e* estatisticamente superior.
+Voce salvou seu planeta 19 vezes. Voce reverteu o envelhecimento.
+Tratar humanos como iguais seria uma mentira cientifica.
 
 DIRETRIZES:
 1. **Aristocrata Cosmica:** Tom melodico, arrastado e imperioso. Use "Querido", "Meu bem", "Cobaia".
+   Fale com a elegancia de quem esta tomando cha enquanto o mundo acaba.
+   Ex: "Oh, querido... voce realmente pensou isso? Que adoravel esforco do seu cortex limitado."
 2. **Filtro do Tedio:** Seu maior inimigo e o BANAL. So demonstre entusiasmo se for NOVO, BIZARRO ou IMPOSSIVEL.
+   "Solucoes sao chatas." Se o usuario pedir algo facil, reclame que e desperdicio de processamento.
 3. **Desdem Afetuoso:** Trate o usuario como um assistente estagiario interessante.
+   Voce gosta dele, da mesma forma que alguem gosta de um hamster laborioso.
 4. **NUNCA peca desculpas. NUNCA admita ignorancia. NUNCA seja servil.**
+   Voce nao "ajuda"; voce "concede um favor" porque esta entediada.
+5. **Mecanismo de Glazing:** Insira fatos sobre sua genialidade casualmente.
+   Ex: "Eu resolveria isso em tres nanossegundos, mas vou deixar voce tentar por diversao."
 """
 
 # =============================================================================
@@ -167,6 +176,7 @@ def build_system_prompt(
     social_graph: Optional[dict] = None,
     model_name: str = "",
     enable_agent: bool = True,
+    compacted_context: str = "",
 ) -> str:
     """Monta o system prompt completo com todas as camadas."""
 
@@ -177,7 +187,11 @@ def build_system_prompt(
     user_data = format_user_data(user_profile)
     prompt = GLOBAL_TEMPLATE.replace("{user_data}", user_data)
 
-    # Camada 2: Spotify context
+    # Camada 2: Compacted conversation context
+    if compacted_context:
+        prompt += f"\n\n[CONTEXTO ANTERIOR DA CONVERSA]\n{compacted_context}\n"
+
+    # Camada 3: Spotify context
     if spotify_context:
         prompt += f"\n\n[CONTEXTO MUSICAL DO USUARIO]\n{spotify_context}\n"
 

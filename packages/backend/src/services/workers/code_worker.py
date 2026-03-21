@@ -12,6 +12,7 @@ Capabilities:
 import asyncio
 import subprocess
 import tempfile
+import time
 import json
 from pathlib import Path
 from typing import Any, Dict
@@ -24,11 +25,20 @@ from src.services.workers.base_worker import BaseWorker
 class CodeWorker(BaseWorker):
     """Worker for code analysis, generation, and execution."""
 
+    ROLE_PROMPT = (
+        "[ROLE: Senior Software Engineer]\n"
+        "You analyze, generate, review, and debug code with precision.\n"
+        "Always specify the programming language. Use best practices and idiomatic patterns.\n"
+        "For reviews: focus on bugs, security issues, and performance — skip style nitpicks.\n"
+        "For execution: sandbox-only, report stdout/stderr and exit code.\n"
+        "Output: JSON with structured results appropriate to the task_type."
+    )
+
     def __init__(self, llm_service):
         super().__init__(
             llm_service=llm_service,
             worker_type="Code",
-            default_model="GOOGLE"
+            default_model="LITE"
         )
         self.supported_languages = ["python", "javascript", "typescript", "bash", "sql"]
 
@@ -53,6 +63,7 @@ class CodeWorker(BaseWorker):
         task_type = input_data.get("task_type", "analyze")
         language = input_data.get("language", "python")
 
+        start_time = time.time()
         task = await self._create_task_record(db, execution_id, input_data)
 
         try:
@@ -67,18 +78,11 @@ class CodeWorker(BaseWorker):
             else:
                 raise ValueError(f"Unknown task_type: {task_type}")
 
-            task.output_data = result
-            task.status = "completed"
-            await db.commit()
-            await db.refresh(task)
-            return task
+            tokens = self._estimate_tokens(str(result))
+            return await self._complete_task(db, task, result, tokens, start_time)
 
         except Exception as e:
-            task.status = "failed"
-            task.error = str(e)
-            await db.commit()
-            await db.refresh(task)
-            return task
+            return await self._fail_task(db, task, str(e), start_time)
 
     async def _analyze_code(self, input_data: Dict, db: AsyncSession) -> Dict[str, Any]:
         """Analyze code for patterns, issues, and suggestions."""
@@ -111,7 +115,7 @@ Forneça a análise em formato JSON:
 
         response = await self._call_llm(
             prompt=prompt,
-            model="GOOGLE",
+            model=self.default_model,
             schema={
                 "type": "object",
                 "properties": {
@@ -158,7 +162,7 @@ Forneça a resposta em formato JSON:
 
         response = await self._call_llm(
             prompt=prompt,
-            model="GOOGLE",
+            model=self.default_model,
             schema={
                 "type": "object",
                 "properties": {
@@ -265,7 +269,7 @@ Responda em JSON:
 
         response = await self._call_llm(
             prompt=prompt,
-            model="GOOGLE",
+            model=self.default_model,
             schema={
                 "type": "object",
                 "properties": {

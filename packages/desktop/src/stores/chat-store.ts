@@ -21,6 +21,10 @@ interface ChatState {
   availableModels: AvailableModel[];
   memoryNotifications: string[];
 
+  // Reasoning Settings
+  reasoningLevel: string;
+  enableThinking: boolean;
+
   // Actions
   setModel: (model: string) => void;
   fetchAvailableModels: () => Promise<void>;
@@ -33,6 +37,8 @@ interface ChatState {
   sendMessageStreaming: (message: string, attachments?: Attachment[], mode?: 'default' | 'web_search' | 'lore_search') => Promise<void>;
   addMessage: (msg: ChatMessage) => void;
   clearMessages: () => void;
+  setReasoningLevel: (level: string) => void;
+  setEnableThinking: (enabled: boolean) => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -41,11 +47,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamingContent: '',
   activeSessionId: null,
   sessions: [],
-  model: 'PRO',
+  model: 'LITE',
   availableModels: [],
   memoryNotifications: [],
+  reasoningLevel: 'medium',
+  enableThinking: false,
 
   setModel: (model) => set({ model }),
+  setReasoningLevel: (level) => set({ reasoningLevel: level }),
+  setEnableThinking: (enabled) => set({ enableThinking: enabled }),
 
   fetchAvailableModels: async () => {
     try {
@@ -127,7 +137,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // HTTP (non-streaming) fallback
   sendMessage: async (message, attachments = [], mode = 'default') => {
-    const { model } = get();
+    const { model, reasoningLevel, enableThinking } = get();
 
     // Extrai images, video, pdfs
     const images = attachments.filter(a => a.type === 'image').map(a => a.data);
@@ -155,6 +165,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         pdfs: pdfs.map(p => ({ data: p.data, name: p.name })),
         mode,
         model,
+        reasoning_level: reasoningLevel,
+        enable_thinking: enableThinking,
       });
 
       set((state) => ({
@@ -180,7 +192,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // WebSocket streaming
   sendMessageStreaming: async (message, attachments = [], mode = 'default') => {
-    const { model } = get();
+    const { model, reasoningLevel, enableThinking } = get();
 
     // Extrai images, video, pdfs
     const images = attachments.filter(a => a.type === 'image').map(a => a.data);
@@ -260,7 +272,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }
 
-    chatWs.sendMessage(message, model, images, video, pdfs, mode);
+    chatWs.sendMessage(message, model, images, video, pdfs, mode, {
+      reasoning_level: reasoningLevel,
+      enable_thinking: enableThinking,
+    });
   },
 
   addMessage: (msg) => set((state) => ({ messages: [...state.messages, msg] })),

@@ -21,11 +21,20 @@ from src.services.workers.base_worker import BaseWorker
 class WebWorker(BaseWorker):
     """Worker for web content fetching and scraping."""
 
+    ROLE_PROMPT = (
+        "[ROLE: Web Content Analyst]\n"
+        "You fetch, parse, and analyze web page content.\n"
+        "Extract the most relevant information, ignoring navigation/ads/boilerplate.\n"
+        "For summaries: capture key points in 2-3 paragraphs.\n"
+        "For data extraction: return structured JSON matching the requested schema.\n"
+        "Always include the source URL in your output."
+    )
+
     def __init__(self, llm_service):
         super().__init__(
             llm_service=llm_service,
             worker_type="Web",
-            default_model="GOOGLE"
+            default_model="LITE"
         )
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -47,6 +56,8 @@ class WebWorker(BaseWorker):
             "extract_schema": {...} (optional, for structured extraction)
         }
         """
+        import time
+        start_time = time.time()
         task = await self._create_task_record(db, execution_id, input_data)
 
         try:
@@ -57,12 +68,7 @@ class WebWorker(BaseWorker):
             page_data = await self._fetch_page(url)
 
             if page_data.get("error"):
-                task.output_data = page_data
-                task.status = "failed"
-                task.error = page_data["error"]
-                await db.commit()
-                await db.refresh(task)
-                return task
+                return await self._fail_task(db, task, page_data["error"], start_time)
 
             # Process based on action
             if action == "summarize":
@@ -74,18 +80,11 @@ class WebWorker(BaseWorker):
             else:  # fetch
                 result = page_data
 
-            task.output_data = result
-            task.status = "completed"
-            await db.commit()
-            await db.refresh(task)
-            return task
+            tokens = self._estimate_tokens(str(result))
+            return await self._complete_task(db, task, result, tokens, start_time)
 
         except Exception as e:
-            task.status = "failed"
-            task.error = str(e)
-            await db.commit()
-            await db.refresh(task)
-            return task
+            return await self._fail_task(db, task, str(e), start_time)
 
     async def _fetch_page(self, url: str) -> Dict[str, Any]:
         """Fetch and parse HTML page."""
@@ -154,7 +153,7 @@ Forneça um resumo estruturado em JSON:
 
         response = await self._call_llm(
             prompt=prompt,
-            model="GOOGLE",
+            model=self.default_model,
             schema={
                 "type": "object",
                 "properties": {
@@ -232,7 +231,7 @@ Se algum campo não for encontrado, use null.
 
         response = await self._call_llm(
             prompt=prompt,
-            model="GOOGLE",
+            model=self.default_model,
             schema=extract_schema if extract_schema else None
         )
 

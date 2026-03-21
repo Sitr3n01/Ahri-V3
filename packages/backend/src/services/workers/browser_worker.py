@@ -26,11 +26,20 @@ class BrowserWorker(BaseWorker):
         playwright install chromium
     """
 
+    ROLE_PROMPT = (
+        "[ROLE: Browser Automation Agent]\n"
+        "You automate browser interactions: navigate, click, fill forms, extract data.\n"
+        "Wait for page loads before interacting. Handle dynamic content gracefully.\n"
+        "For extraction: use CSS selectors when provided, LLM-guided otherwise.\n"
+        "Report navigation state (current URL, page title) after each action.\n"
+        "Output: JSON with action results and current browser state."
+    )
+
     def __init__(self, llm_service):
         super().__init__(
             llm_service=llm_service,
             worker_type="Browser",
-            default_model="PRO"
+            default_model="LITE"
         )
         self.browser = None
         self.playwright_available = False
@@ -70,6 +79,8 @@ class BrowserWorker(BaseWorker):
             await db.refresh(task)
             return task
 
+        import time
+        start_time = time.time()
         task = await self._create_task_record(db, execution_id, input_data)
 
         try:
@@ -97,18 +108,11 @@ class BrowserWorker(BaseWorker):
 
                 await browser.close()
 
-            task.output_data = result
-            task.status = "completed"
-            await db.commit()
-            await db.refresh(task)
-            return task
+            tokens = self._estimate_tokens(str(result))
+            return await self._complete_task(db, task, result, tokens, start_time)
 
         except Exception as e:
-            task.status = "failed"
-            task.error = str(e)
-            await db.commit()
-            await db.refresh(task)
-            return task
+            return await self._fail_task(db, task, str(e), start_time)
 
     async def _navigate(self, page, input_data: Dict) -> Dict[str, Any]:
         """Navigate to URL and wait for page load."""
@@ -244,7 +248,7 @@ Retorne em JSON:
 
             response = await self._call_llm(
                 prompt=prompt,
-                model="PRO",
+                model=self.default_model,
                 schema={
                     "type": "object",
                     "properties": {

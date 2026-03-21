@@ -192,6 +192,86 @@ class VectorService:
         self.ingest_knowledge_base()
         return filename
 
+    def list_memories(self, source_type: str = None, limit: int = 100) -> list[dict]:
+        """Lista memórias com metadata. Filtra por source_type se fornecido."""
+        try:
+            kwargs = {"include": ["documents", "metadatas"]}
+            if source_type:
+                kwargs["where"] = {"type": source_type}
+
+            results = self.collection.get(**kwargs)
+
+            memories = []
+            if results and results["ids"]:
+                for i, doc_id in enumerate(results["ids"][:limit]):
+                    meta = results["metadatas"][i] if results["metadatas"] else {}
+                    content = results["documents"][i] if results["documents"] else ""
+                    memories.append({
+                        "id": doc_id,
+                        "content": content,
+                        "type": meta.get("type", "unknown"),
+                        "filename": meta.get("filename", ""),
+                        "source": meta.get("source", ""),
+                    })
+
+            return memories
+        except Exception as e:
+            logger.error(f"[RAG] list_memories error: {e}")
+            return []
+
+    def get_memory(self, memory_id: str) -> dict | None:
+        """Busca memória por ID."""
+        try:
+            result = self.collection.get(
+                ids=[memory_id],
+                include=["documents", "metadatas"],
+            )
+            if result and result["ids"]:
+                meta = result["metadatas"][0] if result["metadatas"] else {}
+                content = result["documents"][0] if result["documents"] else ""
+                return {
+                    "id": memory_id,
+                    "content": content,
+                    "type": meta.get("type", "unknown"),
+                    "filename": meta.get("filename", ""),
+                    "source": meta.get("source", ""),
+                    "chunk_index": meta.get("chunk_index", 0),
+                    "last_modified": meta.get("last_modified", 0),
+                }
+            return None
+        except Exception as e:
+            logger.error(f"[RAG] get_memory error: {e}")
+            return None
+
+    def update_memory(self, memory_id: str, new_content: str) -> bool:
+        """Atualiza conteúdo de uma memória existente."""
+        try:
+            existing = self.collection.get(ids=[memory_id], include=["metadatas"])
+            if not existing or not existing["ids"]:
+                return False
+
+            self.collection.update(
+                ids=[memory_id],
+                documents=[new_content],
+            )
+            return True
+        except Exception as e:
+            logger.error(f"[RAG] update_memory error: {e}")
+            return False
+
+    def delete_memory(self, memory_id: str) -> bool:
+        """Deleta memória por ID."""
+        try:
+            existing = self.collection.get(ids=[memory_id])
+            if not existing or not existing["ids"]:
+                return False
+
+            self.collection.delete(ids=[memory_id])
+            return True
+        except Exception as e:
+            logger.error(f"[RAG] delete_memory error: {e}")
+            return False
+
     def search_memory(self, query: str, n_results: int = 4, threshold: float = 1.25) -> str:
         """Busca semântica na memória. Retorna texto formatado com labels."""
         try:

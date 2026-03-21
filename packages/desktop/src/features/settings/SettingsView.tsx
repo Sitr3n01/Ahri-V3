@@ -30,15 +30,23 @@ interface ApiKeysConfig {
   deepinfra_api_key: string;
   gh_token: string;
   gist_id: string;
+  // Agent Mode round-robin keys (5 keys × 15 RPM = 75 RPM)
+  agent_api_key_1: string;
+  agent_api_key_2: string;
+  agent_api_key_3: string;
+  agent_api_key_4: string;
+  agent_api_key_5: string;
 }
 
 interface ChatConfig {
-  default_engine: 'PRO' | 'GOOGLE' | 'DEEPSEEK' | 'LOCAL';
+  default_engine: 'LITE' | 'DEEPSEEK' | 'LOCAL';
   streaming_enabled: boolean;
   max_history_messages: number;
   auto_save_tags: boolean;
   show_timestamps: boolean;
   japanese_mode: boolean;
+  compaction_threshold: number;
+  compaction_recent_window: number;
 }
 
 interface AgentConfig {
@@ -48,6 +56,10 @@ interface AgentConfig {
   ollama_base_url: string;
   auto_approve_tasks: boolean;
   max_parallel_workers: number;
+  agent_mode_tpm_limit: number;
+  agent_mode_rpm_limit: number;
+  agent_mode_local_model: string;
+  agent_mode_api_model: string;
 }
 
 interface UserProfile {
@@ -105,24 +117,35 @@ const DEFAULT_API_KEYS: ApiKeysConfig = {
   deepinfra_api_key: '',
   gh_token: '',
   gist_id: '',
+  agent_api_key_1: '',
+  agent_api_key_2: '',
+  agent_api_key_3: '',
+  agent_api_key_4: '',
+  agent_api_key_5: '',
 };
 
 const DEFAULT_CHAT: ChatConfig = {
-  default_engine: 'PRO',
+  default_engine: 'LITE',
   streaming_enabled: true,
   max_history_messages: 50,
   auto_save_tags: true,
   show_timestamps: true,
   japanese_mode: false,
+  compaction_threshold: 30,
+  compaction_recent_window: 15,
 };
 
 const DEFAULT_AGENT: AgentConfig = {
   agent_mode_enabled: true,
-  orchestrator_model: 'gemini-2.5-flash',
+  orchestrator_model: 'gemini-3.1-flash-lite',
   tpm_limit: 15000,
   ollama_base_url: 'http://localhost:11434',
   auto_approve_tasks: false,
   max_parallel_workers: 4,
+  agent_mode_tpm_limit: 250000,
+  agent_mode_rpm_limit: 15,
+  agent_mode_local_model: 'qwen3:8b',
+  agent_mode_api_model: 'gemini-3.1-flash-lite',
 };
 
 const DEFAULT_PROFILE: UserProfile = {
@@ -143,7 +166,7 @@ const DEFAULT_PROFILE: UserProfile = {
 };
 
 // ── Main Component ────────────────────────────────────────────
-export function SettingsView() {
+export function SettingsView({ onClose }: { onClose?: () => void }) {
   const t = useT();
   const locale = useI18nStore((s) => s.locale);
   const setLocale = useI18nStore((s) => s.setLocale);
@@ -196,23 +219,35 @@ export function SettingsView() {
           deepinfra_api_key: settings.deepinfra_api_key || '',
           gh_token: settings.gh_token || '',
           gist_id: settings.gist_id || '',
+          agent_api_key_1: settings.agent_api_key_1 || '',
+          agent_api_key_2: settings.agent_api_key_2 || '',
+          agent_api_key_3: settings.agent_api_key_3 || '',
+          agent_api_key_4: settings.agent_api_key_4 || '',
+          agent_api_key_5: settings.agent_api_key_5 || '',
         });
 
-        // Map Profile preferences to ChatConfig
+        // Map Profile preferences to ChatConfig + compaction from settings
         const prefs = profile.preferences || {};
-        if (prefs.chat) {
-          setChatConfig({ ...DEFAULT_CHAT, ...prefs.chat });
-        }
+        setChatConfig({
+          ...DEFAULT_CHAT,
+          ...(prefs.chat || {}),
+          compaction_threshold: settings.compaction_threshold || 30,
+          compaction_recent_window: settings.compaction_recent_window || 15,
+        });
 
         // Map Settings + Preferences to AgentConfig
         const agentPrefs = (prefs.agent || {}) as Record<string, any>;
         setAgentConfig({
           agent_mode_enabled: settings.agent_mode_enabled ?? true,
-          orchestrator_model: settings.agent_mode_orchestrator || 'gemini-2.5-flash',
+          orchestrator_model: settings.agent_mode_orchestrator || 'gemini-3.1-flash-lite',
           tpm_limit: settings.google_ai_studio_tpm_limit || 15000,
           ollama_base_url: settings.ollama_base_url || 'http://localhost:11434',
           auto_approve_tasks: agentPrefs.auto_approve_tasks ?? false,
-          max_parallel_workers: agentPrefs.max_parallel_workers ?? 4,
+          max_parallel_workers: settings.agent_mode_max_parallel || 4,
+          agent_mode_tpm_limit: settings.agent_mode_tpm_limit || 250000,
+          agent_mode_rpm_limit: settings.agent_mode_rpm_limit || 15,
+          agent_mode_local_model: settings.agent_mode_local_model || 'qwen3:8b',
+          agent_mode_api_model: settings.agent_mode_api_model || 'gemini-3.1-flash-lite',
         });
 
         // Map Profile
@@ -287,6 +322,11 @@ export function SettingsView() {
           chat: chatConfig
         }
       });
+      // Save compaction settings to .env via settings API
+      await api.updateSettings({
+        compaction_threshold: chatConfig.compaction_threshold,
+        compaction_recent_window: chatConfig.compaction_recent_window,
+      });
       showFeedback(locale === 'pt' ? 'Config. chat salva' : 'Chat settings saved');
     } catch {
       showFeedback('Error saving chat config');
@@ -296,12 +336,17 @@ export function SettingsView() {
   const handleSaveAgentConfig = async () => {
     saveToStorage('agent', agentConfig);
     try {
-      // 1. Save Environment Settings
+      // 1. Save Environment Settings (all agent config to .env)
       await api.updateSettings({
         agent_mode_enabled: agentConfig.agent_mode_enabled,
         agent_mode_orchestrator: agentConfig.orchestrator_model,
         google_ai_studio_tpm_limit: agentConfig.tpm_limit,
         ollama_base_url: agentConfig.ollama_base_url,
+        agent_mode_tpm_limit: agentConfig.agent_mode_tpm_limit,
+        agent_mode_rpm_limit: agentConfig.agent_mode_rpm_limit,
+        agent_mode_max_parallel: agentConfig.max_parallel_workers,
+        agent_mode_local_model: agentConfig.agent_mode_local_model,
+        agent_mode_api_model: agentConfig.agent_mode_api_model,
       });
 
       // 2. Save Profile Preferences
@@ -312,7 +357,6 @@ export function SettingsView() {
           ...profile.preferences,
           agent: {
             auto_approve_tasks: agentConfig.auto_approve_tasks,
-            max_parallel_workers: agentConfig.max_parallel_workers
           }
         }
       });
@@ -442,159 +486,152 @@ export function SettingsView() {
 
   return (
     <div className="flex flex-col h-full w-full">
-      {/* Utility bar (replaces sidebar in settings mode) */}
-      <div className="settings-utility-bar">
-        <div className="settings-utility-inner">
-        <div className="flex items-center gap-2">
-          <span
-            className="text-base font-bold tracking-tight"
-            style={{
-              background: 'linear-gradient(135deg, var(--persona-primary) 0%, var(--persona-secondary) 100%)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text',
-              textShadow: 'none',
-            }}
-          >
-            Ahri
-          </span>
-          <span className="text-[10px] font-mono opacity-35">v3</span>
-        </div>
-        <div className="flex items-center gap-1">
-          {/* Theme toggle */}
-          <button
-            onClick={toggleTheme}
-            className="chat-sidebar-icon-btn"
-            title={appTheme === 'dark' ? t('common.theme_light') : t('common.theme_dark')}
-          >
-            {appTheme === 'dark' ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <circle cx="12" cy="12" r="4" />
-                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
-              </svg>
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-              </svg>
-            )}
-          </button>
-          {/* Logout */}
-          <button onClick={logout} className="chat-sidebar-icon-btn" title={t('nav.logout')}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
-            </svg>
-          </button>
-        </div>
-        </div>
-      </div>
-
-      {/* Header with tabs */}
+      {/* Unified Settings Header */}
       <div className="settings-header">
         <div className="settings-header-inner">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1
-              className="text-lg font-bold"
-              style={{
-                background: 'linear-gradient(135deg, var(--persona-primary) 0%, var(--persona-secondary) 100%)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text',
-              }}
-            >
-              {t('settings.title')}
-            </h1>
-            <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-              {t('settings.subtitle')}
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            {/* Language switcher */}
-            <div className="flex items-center gap-1 text-xs">
-              <button
-                onClick={() => setLocale('pt')}
-                className="px-2 py-1 rounded text-xs font-medium transition-all"
-                style={locale === 'pt'
-                  ? { background: 'var(--surface-active)', color: 'var(--text-primary)' }
-                  : { color: 'var(--text-tertiary)' }
-                }
+          <div className="flex items-start justify-between">
+            {/* Left: Title & Subtitle */}
+            <div>
+              <h1
+                className="text-2xl font-bold tracking-tight mb-1"
+                style={{
+                  background: 'linear-gradient(135deg, var(--persona-primary) 0%, var(--persona-secondary) 100%)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
+                }}
               >
-                PT
-              </button>
-              <span style={{ color: 'var(--text-tertiary)' }}>|</span>
-              <button
-                onClick={() => setLocale('en')}
-                className="px-2 py-1 rounded text-xs font-medium transition-all"
-                style={locale === 'en'
-                  ? { background: 'var(--surface-active)', color: 'var(--text-primary)' }
-                  : { color: 'var(--text-tertiary)' }
-                }
-              >
-                EN
-              </button>
+                {t('settings.title')}
+              </h1>
+              <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
+                {t('settings.subtitle')}
+              </p>
             </div>
 
-            {savedFeedback && (
-              <div className="settings-saved-badge">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <path d="M20 6L9 17l-5-5" />
-                </svg>
-                {savedFeedback}
-              </div>
-            )}
-          </div>
-        </div>
+            {/* Right: Utilities */}
+            <div className="flex items-center gap-4">
+              {savedFeedback && (
+                <div className="settings-saved-badge">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path d="M20 6L9 17l-5-5" />
+                  </svg>
+                  {savedFeedback}
+                </div>
+              )}
 
-        {/* Tab bar */}
-        <div className="settings-tab-bar">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`settings-tab ${activeTab === tab.id ? 'active' : ''}`}
-              style={activeTab === tab.id ? { '--tab-color': 'var(--persona-primary)' } as React.CSSProperties : undefined}
-            >
-              {tab.icon}
-              <span>{tab.label}</span>
-            </button>
-          ))}
-        </div>
+              <div className="flex items-center p-1 rounded-xl" style={{ background: 'rgba(255, 255, 255, 0.03)', border: '1px solid var(--glass-border)' }}>
+                {/* Language switcher */}
+                <button
+                  onClick={() => setLocale('pt')}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                  style={locale === 'pt'
+                    ? { background: 'var(--persona-primary)', color: '#fff', boxShadow: '0 2px 8px color-mix(in srgb, var(--persona-shadow) 40%, transparent)' }
+                    : { color: 'var(--text-tertiary)' }
+                  }
+                >
+                  PT
+                </button>
+                <button
+                  onClick={() => setLocale('en')}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                  style={locale === 'en'
+                    ? { background: 'var(--persona-primary)', color: '#fff', boxShadow: '0 2px 8px color-mix(in srgb, var(--persona-shadow) 40%, transparent)' }
+                    : { color: 'var(--text-tertiary)' }
+                  }
+                >
+                  EN
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1">
+                {/* Theme toggle */}
+                <button
+                  onClick={toggleTheme}
+                  className="settings-key-toggle"
+                  title={appTheme === 'dark' ? t('common.theme_light') : t('common.theme_dark')}
+                >
+                  {appTheme === 'dark' ? (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                      <circle cx="12" cy="12" r="4" />
+                      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+                    </svg>
+                  ) : (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                    </svg>
+                  )}
+                </button>
+                {/* Logout */}
+                <button onClick={logout} className="settings-key-toggle text-red-400 hover:text-red-300 hover:border-red-500/30 hover:bg-red-500/10" title={t('nav.logout')}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                    <polyline points="16 17 21 12 16 7" />
+                    <line x1="21" y1="12" x2="9" y2="12" />
+                  </svg>
+                </button>
+                {/* Close settings */}
+                {onClose && (
+                  <button onClick={onClose} className="settings-key-toggle" title={t('common.close')}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Tab bar */}
+          <div className="settings-tab-bar">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`settings-tab ${activeTab === tab.id ? 'active' : ''}`}
+                style={activeTab === tab.id ? { '--tab-color': 'var(--persona-primary)' } as React.CSSProperties : undefined}
+              >
+                {tab.icon}
+                <span>{tab.label}</span>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-y-auto settings-content">
-        {activeTab === 'api-keys' && (
-          <ApiKeysTab config={apiKeys} onChange={setApiKeys} onSave={handleSaveApiKeys} />
-        )}
-        {activeTab === 'chat' && (
-          <ChatTab config={chatConfig} onChange={setChatConfig} onSave={handleSaveChatConfig} />
-        )}
-        {activeTab === 'agent' && (
-          <AgentTab config={agentConfig} onChange={setAgentConfig} onSave={handleSaveAgentConfig} />
-        )}
-        {activeTab === 'profile' && (
-          <ProfileTab config={userProfile} onChange={setUserProfile} onSave={handleSaveProfile} />
-        )}
-        {activeTab === 'personas' && (
-          <PersonasTab
-            personas={personas}
-            selectedPersona={selectedPersona}
-            activePersona={activePersona}
-            editedData={editedData}
-            hasChanges={hasChanges}
-            currentTheme={currentTheme}
-            onSelectPersona={(name) => {
-              if (hasChanges && !confirm(t('persona.unsaved_confirm'))) return;
-              setSelectedPersona(name);
-            }}
-            onFieldChange={handlePersonaFieldChange}
-            onSave={handlePersonaSave}
-            onCancel={handlePersonaCancel}
-          />
-        )}
+      <div className="flex-1 overflow-y-auto settings-content relative">
+        <div key={activeTab} className="h-full w-full animate-fade-in" style={{ animationDuration: '0.35s' }}>
+          {activeTab === 'api-keys' && (
+            <ApiKeysTab config={apiKeys} onChange={setApiKeys} onSave={handleSaveApiKeys} />
+          )}
+          {activeTab === 'chat' && (
+            <ChatTab config={chatConfig} onChange={setChatConfig} onSave={handleSaveChatConfig} />
+          )}
+          {activeTab === 'agent' && (
+            <AgentTab config={agentConfig} onChange={setAgentConfig} onSave={handleSaveAgentConfig} />
+          )}
+          {activeTab === 'profile' && (
+            <ProfileTab config={userProfile} onChange={setUserProfile} onSave={handleSaveProfile} />
+          )}
+          {activeTab === 'personas' && (
+            <PersonasTab
+              personas={personas}
+              selectedPersona={selectedPersona}
+              activePersona={activePersona}
+              editedData={editedData}
+              hasChanges={hasChanges}
+              currentTheme={currentTheme}
+              onSelectPersona={(name) => {
+                if (hasChanges && !confirm(t('persona.unsaved_confirm'))) return;
+                setSelectedPersona(name);
+              }}
+              onFieldChange={handlePersonaFieldChange}
+              onSave={handlePersonaSave}
+              onCancel={handlePersonaCancel}
+            />
+          )}
+        </div>
       </div>
     </div>
   );
@@ -617,8 +654,6 @@ function ApiKeysTab({
 
   return (
     <div className="settings-panel">
-      <GoogleOAuthSection />
-
       <SettingsSection title={t('api.google_gemini')} description={t('api.google_gemini_desc')}>
         <KeyInput label={t('api.gemini_paid')} value={config.gemini_api_key_paid} onChange={(v) => updateField('gemini_api_key_paid', v)} placeholder="AIza..." />
         <KeyInput label={t('api.gemini_free')} value={config.gemini_api_key_free} onChange={(v) => updateField('gemini_api_key_free', v)} placeholder="AIza..." />
@@ -661,6 +696,19 @@ function ApiKeysTab({
         </div>
       </SettingsSection>
 
+      <SettingsSection title="Agent Mode Keys (Round-Robin)" description="5 API keys × 15 RPM = 75 RPM total. Add Gemini API keys for agent mode to increase throughput.">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <KeyInput
+            key={`agent_key_${n}`}
+            label={`Agent Key ${n}`}
+            value={config[`agent_api_key_${n}` as keyof ApiKeysConfig]}
+            onChange={(v) => updateField(`agent_api_key_${n}` as keyof ApiKeysConfig, v)}
+            placeholder="AIza..."
+            hint={n === 1 ? 'Primary agent key (required for agent mode)' : undefined}
+          />
+        ))}
+      </SettingsSection>
+
       <SettingsSection title={t('api.other')} description={t('api.other_desc')}>
         <KeyInput label={t('api.deepinfra_key')} value={config.deepinfra_api_key} onChange={(v) => updateField('deepinfra_api_key', v)} placeholder="di_..." hint={t('api.deepinfra_hint')} />
         <KeyInput label={t('api.github_token')} value={config.gh_token} onChange={(v) => updateField('gh_token', v)} placeholder="ghp_..." hint={t('api.github_hint')} />
@@ -691,11 +739,11 @@ function ChatTab({
   onSave: () => void;
 }) {
   const t = useT();
+  const locale = useI18nStore((s) => s.locale);
   const engines = [
-    { value: 'PRO', label: t('chat.pro_label'), desc: t('chat.pro_desc') },
-    { value: 'GOOGLE', label: t('chat.google_label'), desc: t('chat.google_desc') },
-    { value: 'DEEPSEEK', label: t('chat.deepseek_label'), desc: t('chat.deepseek_desc') },
-    { value: 'LOCAL', label: t('chat.local_label'), desc: t('chat.local_desc') },
+    { value: 'LITE', label: 'Flash Lite', desc: locale === 'pt' ? 'Gemini 3.1 Flash Lite — rápido e econômico' : 'Gemini 3.1 Flash Lite — fast & affordable' },
+    { value: 'DEEPSEEK', label: 'DeepSeek R1', desc: locale === 'pt' ? 'Via OpenRouter — raciocínio forte' : 'Via OpenRouter — strong reasoning' },
+    { value: 'LOCAL', label: 'Ollama Local', desc: locale === 'pt' ? 'Modelos locais auto-hospedados' : 'Self-hosted local models' },
   ];
 
   return (
@@ -732,6 +780,26 @@ function ChatTab({
         </div>
       </SettingsSection>
 
+      <SettingsSection
+        title={locale === 'pt' ? 'Compactação' : 'Compaction'}
+        description={locale === 'pt' ? 'Resumir mensagens antigas automaticamente para economizar contexto' : 'Auto-summarize older messages to save context window'}
+      >
+        <div>
+          <label className="settings-label">{locale === 'pt' ? 'Limite de Compactação' : 'Compaction Threshold'}</label>
+          <input type="number" className="settings-input" value={config.compaction_threshold} onChange={(e) => onChange({ ...config, compaction_threshold: Number(e.target.value) })} min={10} max={200} step={5} />
+          <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
+            {locale === 'pt' ? 'Compactar quando o histórico ultrapassar esse número de mensagens' : 'Compact when history exceeds this many messages'}
+          </p>
+        </div>
+        <div>
+          <label className="settings-label">{locale === 'pt' ? 'Janela Recente' : 'Recent Window'}</label>
+          <input type="number" className="settings-input" value={config.compaction_recent_window} onChange={(e) => onChange({ ...config, compaction_recent_window: Number(e.target.value) })} min={5} max={100} step={5} />
+          <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
+            {locale === 'pt' ? 'Manter as últimas N mensagens sem compactar (sempre no contexto completo)' : 'Keep last N messages uncompacted (always in full context)'}
+          </p>
+        </div>
+      </SettingsSection>
+
       <div className="settings-actions">
         <button onClick={onSave} className="settings-save-btn">{t('chat.save')}</button>
       </div>
@@ -750,6 +818,7 @@ function AgentTab({
   onSave: () => void;
 }) {
   const t = useT();
+  const locale = useI18nStore((s) => s.locale);
 
   return (
     <div className="settings-panel">
@@ -762,22 +831,62 @@ function AgentTab({
         <div>
           <label className="settings-label">{t('agent.orchestrator_model')}</label>
           <select className="settings-input" value={config.orchestrator_model} onChange={(e) => onChange({ ...config, orchestrator_model: e.target.value })}>
-            <option value="gemini-2.5-pro-preview">Gemini 2.5 Pro (Best, slower)</option>
+            <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite (Default, cheapest)</option>
             <option value="gemini-2.5-flash">Gemini 2.5 Flash (Fast)</option>
-            <option value="gemma-3-27b">Gemma 3 27B (Free tier)</option>
+            <option value="gemini-2.5-pro-preview">Gemini 2.5 Pro (Best, slower)</option>
           </select>
         </div>
       </SettingsSection>
 
-      <SettingsSection title={t('agent.workers')} description={t('agent.workers_desc')}>
+      <SettingsSection
+        title={locale === 'pt' ? 'Modelos dos Agentes' : 'Agent Models'}
+        description={locale === 'pt' ? 'Modelos usados pelos workers do modo agente' : 'Models used by agent mode workers'}
+      >
+        <div>
+          <label className="settings-label">{locale === 'pt' ? 'Modelo API' : 'API Model'}</label>
+          <input type="text" className="settings-input" value={config.agent_mode_api_model} onChange={(e) => onChange({ ...config, agent_mode_api_model: e.target.value })} placeholder="gemini-3.1-flash-lite" />
+          <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
+            {locale === 'pt' ? 'Modelo para workers baseados em API' : 'Model for API-based agent workers'}
+          </p>
+        </div>
+        <div>
+          <label className="settings-label">{locale === 'pt' ? 'Modelo Local (Ollama)' : 'Local Model (Ollama)'}</label>
+          <input type="text" className="settings-input" value={config.agent_mode_local_model} onChange={(e) => onChange({ ...config, agent_mode_local_model: e.target.value })} placeholder="qwen3:8b" />
+          <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
+            {locale === 'pt' ? 'Modelo Ollama para workers locais' : 'Ollama model for local agent workers'}
+          </p>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        title={locale === 'pt' ? 'Limites & Workers' : 'Rate Limits & Workers'}
+        description={locale === 'pt' ? 'Limites de taxa e configuração de workers paralelos' : 'Rate limiting and parallel worker configuration'}
+      >
+        <div>
+          <label className="settings-label">TPM Limit</label>
+          <input type="number" className="settings-input" value={config.agent_mode_tpm_limit} onChange={(e) => onChange({ ...config, agent_mode_tpm_limit: Number(e.target.value) })} min={10000} max={1000000} step={10000} />
+          <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
+            {locale === 'pt' ? 'Tokens por minuto (250k padrão para Flash Lite free tier)' : 'Tokens per minute (250k default for Flash Lite free tier)'}
+          </p>
+        </div>
+        <div>
+          <label className="settings-label">RPM Limit ({locale === 'pt' ? 'por chave' : 'per key'})</label>
+          <input type="number" className="settings-input" value={config.agent_mode_rpm_limit} onChange={(e) => onChange({ ...config, agent_mode_rpm_limit: Number(e.target.value) })} min={1} max={100} />
+          <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
+            {locale === 'pt' ? 'Requisições por minuto por chave API (15 padrão)' : 'Requests per minute per API key (15 default)'}
+          </p>
+        </div>
         <div>
           <label className="settings-label">{t('agent.max_workers')}</label>
-          <input type="number" className="settings-input" value={config.max_parallel_workers} onChange={(e) => onChange({ ...config, max_parallel_workers: Number(e.target.value) })} min={1} max={8} />
+          <input type="number" className="settings-input" value={config.max_parallel_workers} onChange={(e) => onChange({ ...config, max_parallel_workers: Number(e.target.value) })} min={1} max={20} />
           <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>{t('agent.max_workers_hint')}</p>
         </div>
         <div>
-          <label className="settings-label">{t('agent.tpm_limit')}</label>
+          <label className="settings-label">AI Studio TPM (legacy)</label>
           <input type="number" className="settings-input" value={config.tpm_limit} onChange={(e) => onChange({ ...config, tpm_limit: Number(e.target.value) })} min={1000} max={100000} step={1000} />
+          <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
+            {locale === 'pt' ? 'google_ai_studio_tpm_limit (v1 legado — 15k padrão)' : 'google_ai_studio_tpm_limit (v1 legacy — 15k default)'}
+          </p>
         </div>
         <div>
           <label className="settings-label">{t('agent.ollama_url')}</label>
@@ -797,6 +906,7 @@ function AgentTab({
             { name: 'Vision', icon: '👁️', key: 'worker.vision' as const },
             { name: 'Browser', icon: '🌍', key: 'worker.browser' as const },
             { name: 'Router', icon: '🔀', key: 'worker.router' as const },
+            { name: 'Search', icon: '🔍', key: 'worker.search' as const },
           ].map((w) => (
             <div key={w.name} className="settings-worker-card">
               <span className="text-lg">{w.icon}</span>
@@ -1110,199 +1220,6 @@ function PersonasTab({
 }
 
 // ── Shared Components ─────────────────────────────────────────
-// ── Google OAuth Section ──────────────────────────────────────
-function GoogleOAuthSection() {
-  const [oauthStatus, setOauthStatus] = useState<{ configured: boolean; connected: boolean; email: string | null; models: any[] }>({
-    configured: false, connected: false, email: null, models: []
-  });
-  const [polling, setPolling] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Check OAuth status on mount
-  useEffect(() => {
-    checkStatus();
-  }, []);
-
-  // Poll while waiting for callback
-  useEffect(() => {
-    if (!polling) return;
-    const interval = setInterval(async () => {
-      try {
-        const status = await api.getOAuthStatus();
-        setOauthStatus(status);
-        if (status.connected) {
-          setPolling(false);
-          // Refresh available models in chat store
-          const { useChatStore } = await import('@/stores/chat-store');
-          useChatStore.getState().fetchAvailableModels();
-        }
-      } catch { /* ignore */ }
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [polling]);
-
-  const checkStatus = async () => {
-    try {
-      const status = await api.getOAuthStatus();
-      setOauthStatus(status);
-    } catch { /* ignore */ }
-  };
-
-  const handleConnect = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const { auth_url } = await api.initiateGoogleOAuth();
-      // Open in system browser
-      if ((window as any).ahri?.agent?.openUrl) {
-        (window as any).ahri.agent.openUrl(auth_url);
-      } else {
-        window.open(auth_url, '_blank');
-      }
-      setPolling(true);
-    } catch (e: any) {
-      console.error('OAuth initiation failed:', e);
-      const msg = e?.response?.data?.detail || e?.message || 'Falha ao iniciar OAuth';
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDisconnect = async () => {
-    setLoading(true);
-    try {
-      await api.disconnectGoogleOAuth();
-      setOauthStatus({ configured: false, connected: false, email: null, models: [] });
-      // Refresh available models
-      const { useChatStore } = await import('@/stores/chat-store');
-      useChatStore.getState().fetchAvailableModels();
-    } catch (e) {
-      console.error('OAuth disconnect failed:', e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <section className="settings-section" style={{ borderColor: oauthStatus.connected ? 'rgba(34, 197, 94, 0.3)' : undefined }}>
-      <div className="settings-section-header">
-        <div className="flex items-center gap-2">
-          <h3 className="settings-section-title">Google Account (OAuth)</h3>
-          {oauthStatus.connected && (
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium" style={{ background: 'rgba(34, 197, 94, 0.15)', color: '#22c55e' }}>
-              Conectado
-            </span>
-          )}
-        </div>
-        <p className="settings-section-desc">
-          Conecte sua conta Google para usar todos os modelos do seu plano Gemini.
-        </p>
-      </div>
-      <div className="settings-section-body space-y-3">
-        {oauthStatus.connected ? (
-          <div className="space-y-2">
-            <div className="flex items-center gap-3 p-3 rounded-lg" style={{ background: 'var(--button-bg)' }}>
-              <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: 'rgba(34, 197, 94, 0.15)' }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                  {oauthStatus.email || 'Google Account'}
-                </p>
-                <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                  {oauthStatus.models?.length || 0} modelos disponíveis
-                </p>
-              </div>
-              <button
-                onClick={handleDisconnect}
-                disabled={loading}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
-                style={{
-                  background: 'rgba(239, 68, 68, 0.1)',
-                  color: '#ef4444',
-                  border: '1px solid rgba(239, 68, 68, 0.2)',
-                }}
-              >
-                Desconectar
-              </button>
-            </div>
-
-            {/* Model list */}
-            {oauthStatus.models && oauthStatus.models.length > 0 && (
-              <div className="p-3 rounded-lg space-y-1" style={{ background: 'var(--button-bg)' }}>
-                <p className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
-                  Modelos do seu plano:
-                </p>
-                <div className="flex flex-wrap gap-1">
-                  {oauthStatus.models.slice(0, 12).map((m: any) => (
-                    <span key={m.id} className="px-2 py-0.5 rounded text-[10px] font-mono" style={{
-                      background: 'var(--button-bg)',
-                      color: 'var(--text-secondary)',
-                      border: '1px solid var(--glass-border)',
-                    }}>
-                      {m.display_name || m.id}
-                    </span>
-                  ))}
-                  {oauthStatus.models.length > 12 && (
-                    <span className="px-2 py-0.5 rounded text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
-                      +{oauthStatus.models.length - 12} mais
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <button
-              onClick={handleConnect}
-              disabled={loading || polling}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all"
-              style={{
-                background: 'rgba(139, 92, 246, 0.15)',
-                color: '#a78bfa',
-                border: '1px solid rgba(139, 92, 246, 0.3)',
-              }}
-            >
-              {polling ? (
-                <>
-                  <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                  </svg>
-                  Aguardando login no browser...
-                </>
-              ) : (
-                <>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
-                    <polyline points="10 17 15 12 10 7" />
-                    <line x1="15" y1="12" x2="3" y2="12" />
-                  </svg>
-                  Login com Google
-                </>
-              )}
-            </button>
-            {error && (
-              <p className="text-[10px]" style={{ color: 'rgba(239, 68, 68, 0.8)' }}>
-                {error}
-              </p>
-            )}
-            {polling && (
-              <p className="text-[10px] text-center" style={{ color: 'var(--text-tertiary)' }}>
-                Uma janela do browser foi aberta. Faça login e autorize o Ahri.
-              </p>
-            )}
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
 function SettingsSection({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
   return (
     <section className="settings-section">

@@ -9,7 +9,7 @@ import type { ChatRequest, ChatResponse, SessionSummary, SessionDetail } from '.
 import type { AgentTask } from '../types/agent.js';
 import type { AgentExecution, AgentWorkerTask, AgentModeExecuteRequest } from '../types/agent-mode.js';
 import type { UserProfile, SpotifyContext } from '../types/memory.js';
-import type { AvailableModel, OAuthStatus } from '../types/llm.js';
+import type { AvailableModel } from '../types/llm.js';
 
 export interface AhriClientConfig {
   baseUrl: string;
@@ -249,6 +249,23 @@ export class AhriApiClient {
     await this.request<unknown>('POST', '/memory/forget', { topic });
   }
 
+  async listMemories(sourceType?: string): Promise<{ memories: Array<{ id: string; content: string; type: string; filename: string; source: string }>; total: number; persona: string }> {
+    const query = sourceType ? `?source_type=${encodeURIComponent(sourceType)}` : '';
+    return this.request('GET', `/memory/list${query}`);
+  }
+
+  async getMemory(id: string): Promise<{ id: string; content: string; type: string; filename: string; source: string }> {
+    return this.request('GET', `/memory/${encodeURIComponent(id)}`);
+  }
+
+  async updateMemory(id: string, content: string): Promise<{ status: string; id: string }> {
+    return this.request('PUT', `/memory/${encodeURIComponent(id)}`, { content });
+  }
+
+  async deleteMemory(id: string): Promise<{ status: string; id: string }> {
+    return this.request('DELETE', `/memory/${encodeURIComponent(id)}`);
+  }
+
   // =========================================================================
   // Agent
   // =========================================================================
@@ -289,10 +306,20 @@ export class AhriApiClient {
   // Agent Mode
   // =========================================================================
 
-  async executeAgentMode(goal: string, orchestratorModel = 'gemini-2.5-flash'): Promise<AgentExecution> {
+  async executeAgentMode(
+    goal: string,
+    orchestratorModel = 'gemini-3.1-flash-lite',
+    options?: {
+      reasoning_level?: string;
+      enable_thinking?: boolean;
+      internet_search_enabled?: boolean;
+      images?: string[];
+    }
+  ): Promise<AgentExecution> {
     return this.request<AgentExecution>('POST', '/agent-mode/execute', {
       goal,
-      orchestrator_model: orchestratorModel
+      orchestrator_model: orchestratorModel,
+      ...(options || {}),
     });
   }
 
@@ -314,22 +341,6 @@ export class AhriApiClient {
 
   async updateSettings(settings: Record<string, any>): Promise<{ status: string }> {
     return this.request<{ status: string }>('POST', '/settings', { settings });
-  }
-
-  // =========================================================================
-  // Google OAuth
-  // =========================================================================
-
-  async getOAuthStatus(): Promise<OAuthStatus> {
-    return this.request<OAuthStatus>('GET', '/oauth/google/status');
-  }
-
-  async initiateGoogleOAuth(): Promise<{ auth_url: string; state: string }> {
-    return this.request<{ auth_url: string; state: string }>('GET', '/oauth/google/authorize');
-  }
-
-  async disconnectGoogleOAuth(): Promise<{ status: string }> {
-    return this.request<{ status: string }>('POST', '/oauth/google/disconnect');
   }
 
   // =========================================================================

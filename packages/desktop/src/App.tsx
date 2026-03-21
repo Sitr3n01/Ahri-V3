@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { ChatView } from './features/chat/ChatView';
 import { AgentModeView } from './features/agent-mode/AgentModeView';
 import { SettingsView } from './features/settings/SettingsView';
@@ -31,6 +31,12 @@ export function App() {
 
   // Mode state: 'chat' or 'agent'
   const [mode, setMode] = useState<AppMode>('chat');
+  const previousModeRef = useRef<AppMode>('chat');
+
+  // Rastreia o modo anterior (para voltar do settings)
+  useEffect(() => {
+    if (mode !== 'settings') previousModeRef.current = mode;
+  }, [mode]);
 
   // Tenta restaurar tokens ao carregar
   useEffect(() => {
@@ -52,6 +58,13 @@ export function App() {
     }
   }, [activePersona, isAuthenticated, fetchSessions]);
 
+  // Auto-close Agent Tasks panel when switching to chat (visual consistency)
+  useEffect(() => {
+    if (mode === 'chat' && isPanelOpen) {
+      useAgentStore.getState().setPanelOpen(false);
+    }
+  }, [mode, isPanelOpen]);
+
   // Aplica tema da persona ativa como CSS variables
   const theme = getPersonaTheme(activePersona);
 
@@ -70,7 +83,7 @@ export function App() {
       } as React.CSSProperties}
     >
       {/* Top toolbar with mode selector */}
-      <Toolbar mode={mode} setMode={setMode} />
+      <Toolbar mode={mode} setMode={setMode} previousMode={previousModeRef.current} />
 
       {/* Background image layer — always visible, no blur (VN aesthetic) */}
       <style>{`
@@ -85,21 +98,25 @@ export function App() {
       <div
         className="absolute inset-0 z-0 persona-background transition-opacity duration-700"
         style={{
-          opacity: isLight ? 1 : (mode === 'chat' ? Math.max(backgroundOpacity / 100, 0.18) : 0.10),
-          filter: isLight && mode === 'settings' ? 'blur(8px) brightness(1.1)' : 'none',
+          opacity: isLight 
+            ? 1 
+            : (mode === 'chat' ? Math.max(backgroundOpacity / 100, 0.18) : 0.10),
+          filter: mode === 'settings' || (mode === 'agent' && isLight)
+            ? 'blur(20px) brightness(1.1)' 
+            : 'none',
           transition: 'opacity 0.7s, filter 0.5s',
         }}
       />
-      {/* Dark vignette overlay — APENAS no dark mode */}
-      {!isLight && (
-        <div
-          className="absolute inset-0 z-0 transition-opacity duration-500"
-          style={{
-            background: 'radial-gradient(ellipse at center, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.65) 100%)',
-            opacity: mode === 'chat' ? 1 : 0.85,
-          }}
-        />
-      )}
+      {/* Dark vignette overlay — ativo no dark mode ou discretamente no modo agente do light mode */}
+      <div
+        className="absolute inset-0 z-0 transition-opacity duration-500 pointer-events-none"
+        style={{
+          background: 'radial-gradient(ellipse at center, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.7) 100%)',
+          opacity: !isLight 
+            ? (mode === 'chat' ? 1 : 0.85) 
+            : (mode === 'agent' ? 0.15 : 0),
+        }}
+      />
 
       {/* Firefly particles — V2 VN ambiance */}
       <div
@@ -114,14 +131,16 @@ export function App() {
         {/* Sidebar with transition wrapper — hidden in settings mode */}
         {mode !== 'settings' && (
           <div className={`sidebar-wrapper ${sidebarOpen ? 'expanded' : 'collapsed'}`}>
-            <Sidebar mode={mode} />
+            <Sidebar mode={mode} setMode={setMode} previousMode={previousModeRef.current} />
           </div>
         )}
 
-        <main className="flex-1 flex flex-col relative">
-          {mode === 'chat' && <ChatView />}
-          {mode === 'agent' && <AgentModeView />}
-          {mode === 'settings' && <SettingsView />}
+        <main className="flex-1 flex flex-col relative overflow-hidden">
+          <div key={mode} className="flex-1 flex flex-col h-full animate-fade-in" style={{ animationDuration: '0.4s' }}>
+            {mode === 'chat' && <ChatView />}
+            {mode === 'agent' && <AgentModeView />}
+            {mode === 'settings' && <SettingsView onClose={() => setMode(previousModeRef.current)} />}
+          </div>
         </main>
 
         {isPanelOpen && <AgentPanel />}

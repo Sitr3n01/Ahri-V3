@@ -19,8 +19,6 @@ async def get_app_settings(auth: AuthDep):
     s = get_settings()
     
     return SettingsSchema(
-        google_oauth_client_id=s.google_oauth_client_id,
-        google_oauth_client_secret=s.google_oauth_client_secret,
         gemini_api_key_paid=s.gemini_api_key_paid,
         gemini_api_key_free=s.gemini_api_key_free,
         openrouter_api_key=s.openrouter_api_key,
@@ -44,6 +42,18 @@ async def get_app_settings(auth: AuthDep):
         deepinfra_api_key=s.deepinfra_api_key,
         gh_token=s.gh_token,
         gist_id=s.gist_id,
+        agent_mode_rpm_limit=s.agent_mode_rpm_limit,
+        agent_mode_tpm_limit=s.agent_mode_tpm_limit,
+        agent_mode_max_parallel=s.agent_mode_max_parallel,
+        agent_mode_local_model=s.agent_mode_local_model,
+        agent_mode_api_model=s.agent_mode_api_model,
+        compaction_threshold=s.compaction_threshold,
+        compaction_recent_window=s.compaction_recent_window,
+        agent_api_key_1=s.agent_api_key_1,
+        agent_api_key_2=s.agent_api_key_2,
+        agent_api_key_3=s.agent_api_key_3,
+        agent_api_key_4=s.agent_api_key_4,
+        agent_api_key_5=s.agent_api_key_5,
     )
 
 def _update_env_file(root_dir: Path, updates: dict):
@@ -148,7 +158,6 @@ async def update_app_settings(request: UpdateSettingsRequest, auth: AuthDep):
 
 # Cores padrão por provider
 _PROVIDER_COLORS = {
-    "google_oauth": "#8B5CF6",
     "google_apikey": "#3B82F6",
     "openrouter": "#10B981",
     "ollama": "#F97316",
@@ -168,61 +177,30 @@ _MODEL_COLORS = {
 
 @router.get("/models/available", response_model=list[AvailableModelSchema])
 async def get_available_models(auth: AuthDep):
-    """Retorna lista dinâmica de modelos disponíveis."""
-    from src.services.google_oauth_service import get_google_oauth_service
-    from src.services.llm_service import get_llm_service
+    """Retorna lista completa de modelos para chat.
 
-    models: list[AvailableModelSchema] = []
-    oauth_svc = get_google_oauth_service()
-    llm_svc = get_llm_service()
-    s = get_settings()
-
-    # 1. Modelos via OAuth (prioridade)
-    if oauth_svc.is_connected:
-        oauth_models = oauth_svc.list_models()
-        for m in oauth_models:
-            model_id = m["id"]
-            models.append(AvailableModelSchema(
-                id=model_id,
-                display_name=m.get("display_name", model_id),
-                provider="google_oauth",
-                color=_MODEL_COLORS.get(model_id, _PROVIDER_COLORS["google_oauth"]),
-                description=m.get("description", ""),
-                input_token_limit=m.get("input_token_limit", 0),
-                output_token_limit=m.get("output_token_limit", 0),
-            ))
-    else:
-        # 2. Modelos via API key (fallback)
-        if s.gemini_primary_key:
-            models.append(AvailableModelSchema(
-                id="PRO",
-                display_name="Gemini Pro",
-                provider="google_apikey",
-                color=_MODEL_COLORS.get("gemini-2.5-pro", "#8B5CF6"),
-            ))
-        if s.gemini_fallback_key:
-            models.append(AvailableModelSchema(
-                id="GOOGLE",
-                display_name="Gemma 27B",
-                provider="google_apikey",
-                color=_MODEL_COLORS.get("gemma-3-27b-it", "#3B82F6"),
-            ))
-
-    # 3. OpenRouter (sempre disponível se configurado)
-    if s.openrouter_api_key:
-        models.append(AvailableModelSchema(
+    FLASH (Gemini 2.5 Flash) é usado apenas internamente por workers do agent mode
+    (pesquisa, visão, análise). Não aparece como opção de chat.
+    """
+    models: list[AvailableModelSchema] = [
+        AvailableModelSchema(
+            id="LITE",
+            display_name="Gemini Flash Lite",
+            provider="google_apikey",
+            color="#60A5FA",
+        ),
+        AvailableModelSchema(
             id="DEEPSEEK",
             display_name="DeepSeek R1",
             provider="openrouter",
             color=_PROVIDER_COLORS["openrouter"],
-        ))
-
-    # 4. Ollama (sempre disponível)
-    models.append(AvailableModelSchema(
-        id="LOCAL",
-        display_name="Ollama Local",
-        provider="ollama",
-        color=_PROVIDER_COLORS["ollama"],
-    ))
+        ),
+        AvailableModelSchema(
+            id="LOCAL",
+            display_name="Ollama Local",
+            provider="ollama",
+            color=_PROVIDER_COLORS["ollama"],
+        ),
+    ]
 
     return models

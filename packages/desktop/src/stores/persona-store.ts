@@ -61,11 +61,16 @@ export const usePersonaStore = create<PersonaState>()(
       },
 
       activatePersona: async (name) => {
+        const previousPersona = get().activePersona;
+        // Optimistic update
+        set({ activePersona: name });
         try {
           const result = await api.activatePersona(name);
           set({ activePersona: result.active });
         } catch (e) {
           console.error('Failed to activate persona:', e);
+          // Rollback on failure
+          set({ activePersona: previousPersona });
         }
       },
 

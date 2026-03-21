@@ -1,31 +1,31 @@
 /**
  * Agent Mode Store - Zustand state management for orchestrated task execution.
  *
- * Manages:
- * - Execution submissions
- * - Status polling
- * - Worker task tracking
- * - Execution history
+ * V2: Adds model selection, directory context, RPM tracking.
+ * Thread-safe: store actions use immutable patterns (no .push()).
  */
 
 import { create } from 'zustand';
-import type { AgentExecution, AgentWorkerTask } from '@ahri/shared';
+import type { AgentExecution, AgentWorkerTask, TPMStatus, AgentModelId, GeminiReasoningLevel } from '@ahri/shared';
 import { api } from '../api/client';
-
-interface TPMStatus {
-  tokensUsed: number;
-  tokensRemaining: number;
-  limitTPM: number;
-  utilizationPercent: number;
-}
 
 interface AgentModeState {
   // State
   executions: AgentExecution[];
   activeExecution: AgentExecution | null;
-  workerTasks: Map<number, AgentWorkerTask[]>;  // execution_id → tasks
+  workerTasks: Map<number, AgentWorkerTask[]>;
   isLoading: boolean;
   tpmStatus: TPMStatus;
+
+  // Agent Mode v2 — model & directory selection
+  selectedModel: AgentModelId;
+  selectedDirectory: string | null;
+  recentDirectories: string[];
+
+  // Agent Mode v3 — reasoning & internet search
+  reasoningLevel: GeminiReasoningLevel;
+  enableThinking: boolean;
+  internetSearchEnabled: boolean;
 
   // Actions
   executeTask: (goal: string, orchestrator?: string) => Promise<void>;
@@ -35,7 +35,17 @@ interface AgentModeState {
   setActiveExecution: (execution: AgentExecution | null) => void;
   setTPMStatus: (status: TPMStatus) => void;
 
-  // WebSocket updates (Phase 3)
+  // Model & directory actions
+  setSelectedModel: (model: AgentModelId) => void;
+  setSelectedDirectory: (dir: string | null) => void;
+  loadRecentDirectories: () => Promise<void>;
+
+  // Reasoning & internet actions
+  setReasoningLevel: (level: GeminiReasoningLevel) => void;
+  setEnableThinking: (enabled: boolean) => void;
+  setInternetSearchEnabled: (enabled: boolean) => void;
+
+  // WebSocket updates
   updateExecution: (execution: AgentExecution) => void;
   addWorkerTask: (task: AgentWorkerTask) => void;
   updateWorkerTask: (task: AgentWorkerTask) => void;
@@ -44,35 +54,138 @@ interface AgentModeState {
   deleteExecution: (executionId: number) => void;
 }
 
+// Persist model selection in localStorage
+function getPersistedModel(): AgentModelId {
+  try {
+    const stored = localStorage.getItem('ahri-agent-model');
+    if (stored === 'qwen-3.5-local' || stored === 'gemini-flash-lite') return stored;
+  } catch { /* ignore */ }
+  return 'gemini-flash-lite';
+}
+
+function getPersistedDirectory(): string | null {
+  try {
+    return localStorage.getItem('ahri-agent-directory') || null;
+  } catch { return null; }
+}
+
+function getPersistedReasoning(): GeminiReasoningLevel {
+  try {
+    const stored = localStorage.getItem('ahri-agent-reasoning');
+    if (stored === 'off' || stored === 'low' || stored === 'medium' || stored === 'high') return stored;
+  } catch { /* ignore */ }
+  return 'medium';
+}
+
+function getPersistedThinking(): boolean {
+  try {
+    return localStorage.getItem('ahri-agent-thinking') === 'true';
+  } catch { return false; }
+}
+
+function getPersistedInternetSearch(): boolean {
+  try {
+    return localStorage.getItem('ahri-agent-internet') === 'true';
+  } catch { return false; }
+}
+
 export const useAgentModeStore = create<AgentModeState>((set, get) => ({
   // Initial state
   executions: [],
   activeExecution: null,
   workerTasks: new Map(),
   isLoading: false,
-  tpmStatus: { tokensUsed: 0, tokensRemaining: 15000, limitTPM: 15000, utilizationPercent: 0 },
+  tpmStatus: {
+    tokensUsed: 0, tokensRemaining: 250000, limitTPM: 250000, utilizationPercent: 0,
+    requestsUsed: 0, requestsRemaining: 15, limitRPM: 15, rpmUtilizationPercent: 0,
+  },
+
+  // Agent Mode v2 defaults
+  selectedModel: getPersistedModel(),
+  selectedDirectory: getPersistedDirectory(),
+  recentDirectories: [],
+
+  // Agent Mode v3 defaults
+  reasoningLevel: getPersistedReasoning(),
+  enableThinking: getPersistedThinking(),
+  internetSearchEnabled: getPersistedInternetSearch(),
+
+  // Model & directory actions
+  setSelectedModel: (model: AgentModelId) => {
+    localStorage.setItem('ahri-agent-model', model);
+    set({ selectedModel: model });
+  },
+
+  setSelectedDirectory: (dir: string | null) => {
+    if (dir) localStorage.setItem('ahri-agent-directory', dir);
+    else localStorage.removeItem('ahri-agent-directory');
+    set({ selectedDirectory: dir });
+
+    // Also add to recent dirs via IPC
+    if (dir && window.ahri?.agent?.addRecentDir) {
+      window.ahri.agent.addRecentDir(dir).then(dirs => {
+        set({ recentDirectories: dirs });
+      }).catch(() => { /* ignore */ });
+    }
+  },
+
+  loadRecentDirectories: async () => {
+    try {
+      if (window.ahri?.agent?.getRecentDirs) {
+        const dirs = await window.ahri.agent.getRecentDirs();
+        set({ recentDirectories: dirs });
+      }
+    } catch { /* ignore */ }
+  },
+
+  // Reasoning & internet actions
+  setReasoningLevel: (level: GeminiReasoningLevel) => {
+    localStorage.setItem('ahri-agent-reasoning', level);
+    set({ reasoningLevel: level });
+  },
+
+  setEnableThinking: (enabled: boolean) => {
+    localStorage.setItem('ahri-agent-thinking', String(enabled));
+    set({ enableThinking: enabled });
+  },
+
+  setInternetSearchEnabled: (enabled: boolean) => {
+    localStorage.setItem('ahri-agent-internet', String(enabled));
+    set({ internetSearchEnabled: enabled });
+  },
 
   // Execute new task
-  executeTask: async (goal: string, orchestrator = 'PRO') => {
+  executeTask: async (goal: string, orchestrator?: string) => {
     set({ isLoading: true });
 
     try {
-      // Map frontend model names to backend
+      const { selectedModel, selectedDirectory, reasoningLevel, enableThinking, internetSearchEnabled } = get();
+
+      // Map frontend model IDs to backend
       const modelMap: Record<string, string> = {
-        'PRO': 'gemini-2.5-flash',
-        'GOOGLE': 'gemma-3-27b',
-        'DEEPSEEK': 'deepseek-r1',
-        'LOCAL': 'local-ollama'
+        'qwen-3.5-local': 'LOCAL',
+        'gemini-flash-lite': 'gemini-3.1-flash-lite',
       };
 
-      const orchestratorModel = modelMap[orchestrator] || 'gemini-2.5-flash';
+      const orchestratorModel = orchestrator
+        ? orchestrator
+        : (modelMap[selectedModel] || 'gemini-3.1-flash-lite');
 
-      const execution = await api.executeAgentMode(goal, orchestratorModel);
+      // Prepend directory context to goal if set
+      const contextualGoal = selectedDirectory
+        ? `[Diretório: ${selectedDirectory}]\n\n${goal}`
+        : goal;
+
+      const execution = await api.executeAgentMode(contextualGoal, orchestratorModel, {
+        reasoning_level: reasoningLevel,
+        enable_thinking: enableThinking,
+        internet_search_enabled: internetSearchEnabled,
+      });
 
       set({
         activeExecution: execution,
         executions: [execution, ...get().executions],
-        isLoading: false
+        isLoading: false,
       });
 
       // Start polling for status updates
@@ -89,25 +202,21 @@ export const useAgentModeStore = create<AgentModeState>((set, get) => ({
     try {
       const execution = await api.getAgentModeStatus(executionId);
 
-      // Update active execution if it matches
       if (get().activeExecution?.id === executionId) {
         set({ activeExecution: execution });
       }
 
-      // Update in executions list
       set({
         executions: get().executions.map(e =>
           e.id === executionId ? execution : e
-        )
+        ),
       });
 
-      // Load worker tasks
       if (execution.worker_tasks && execution.worker_tasks.length > 0) {
         const workerTasks = new Map(get().workerTasks);
         workerTasks.set(executionId, execution.worker_tasks);
         set({ workerTasks });
       }
-
     } catch (error) {
       console.error('[AgentMode] Status poll failed:', error);
     }
@@ -125,62 +234,45 @@ export const useAgentModeStore = create<AgentModeState>((set, get) => ({
     }
   },
 
-  // Update TPM status (from WebSocket)
-  setTPMStatus: (status: TPMStatus) => {
-    set({ tpmStatus: status });
-  },
+  setTPMStatus: (status: TPMStatus) => set({ tpmStatus: status }),
 
-  // Clear execution history
-  clearHistory: () => {
-    set({
-      executions: [],
-      activeExecution: null,
-      workerTasks: new Map()
-    });
-  },
+  clearHistory: () => set({
+    executions: [],
+    activeExecution: null,
+    workerTasks: new Map(),
+  }),
 
-  // Set active execution (for viewing past runs)
   setActiveExecution: (execution: AgentExecution | null) => {
     set({ activeExecution: execution });
-
-    // Load worker tasks if not already loaded
     if (execution && !get().workerTasks.has(execution.id)) {
       get().loadWorkerTasks(execution.id);
     }
   },
 
-  // Update execution from WebSocket
+  // WebSocket updates (immutable patterns)
   updateExecution: (execution: AgentExecution) => {
-    // Update active execution if it matches
     if (get().activeExecution?.id === execution.id) {
       set({ activeExecution: execution });
     }
-
-    // Update in executions list
     set({
       executions: get().executions.map(e =>
         e.id === execution.id ? execution : e
-      )
+      ),
     });
   },
 
-  // Add new worker task from WebSocket
   addWorkerTask: (task: AgentWorkerTask) => {
     const workerTasks = new Map(get().workerTasks);
     const existingTasks = workerTasks.get(task.execution_id) || [];
-
-    // Only add if not already in list
     if (!existingTasks.find(t => t.id === task.id)) {
       workerTasks.set(task.execution_id, [...existingTasks, task]);
       set({ workerTasks });
     }
   },
 
-  // Update worker task from WebSocket
   updateWorkerTask: (task: AgentWorkerTask) => {
     const workerTasks = new Map(get().workerTasks);
     const existingTasks = workerTasks.get(task.execution_id) || [];
-
     workerTasks.set(
       task.execution_id,
       existingTasks.map(t => t.id === task.id ? task : t)
@@ -188,30 +280,27 @@ export const useAgentModeStore = create<AgentModeState>((set, get) => ({
     set({ workerTasks });
   },
 
-  // Delete execution from history
   deleteExecution: (executionId: number) => {
     const workerTasks = new Map(get().workerTasks);
     workerTasks.delete(executionId);
-
     set({
       executions: get().executions.filter(e => e.id !== executionId),
       activeExecution: get().activeExecution?.id === executionId ? null : get().activeExecution,
-      workerTasks
+      workerTasks,
     });
-  }
+  },
 }));
 
 // Helper: Poll execution until completed/failed
 function pollExecutionUntilComplete(executionId: number) {
-  const store = useAgentModeStore.getState();
-  const pollInterval = 2000; // Poll every 2 seconds
+  const pollInterval = 2000;
   let pollCount = 0;
-  const maxPolls = 150; // Max 5 minutes (150 * 2s)
+  const maxPolls = 300; // Max 10 minutes (300 * 2s) — increased for background tasks
 
   const interval = setInterval(async () => {
+    const store = useAgentModeStore.getState();
     const execution = store.executions.find(e => e.id === executionId);
 
-    // Stop if execution is done
     if (
       !execution ||
       execution.status === 'completed' ||
@@ -225,7 +314,6 @@ function pollExecutionUntilComplete(executionId: number) {
       return;
     }
 
-    // Continue polling
     await store.pollStatus(executionId);
     pollCount++;
   }, pollInterval);

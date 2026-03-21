@@ -20,11 +20,20 @@ from src.services.workers.base_worker import BaseWorker
 class MemoryWorker(BaseWorker):
     """Worker for memory search and analysis."""
 
+    ROLE_PROMPT = (
+        "[ROLE: Memory Analyst]\n"
+        "You search and synthesize information from the user's memory systems.\n"
+        "Sources: episodic memories, persona session logs, user profile attributes.\n"
+        "Cross-reference multiple memory types for comprehensive answers.\n"
+        "Flag when memories may be outdated or contradictory.\n"
+        "Output: JSON with 'findings', 'sources', and 'memory_type' fields."
+    )
+
     def __init__(self, llm_service):
         super().__init__(
             llm_service=llm_service,
             worker_type="Memory",
-            default_model="GOOGLE"
+            default_model="LITE"
         )
         self.data_dir = Path("data")
 
@@ -45,6 +54,8 @@ class MemoryWorker(BaseWorker):
             "limit": 10 (max results)
         }
         """
+        import time
+        start_time = time.time()
         task = await self._create_task_record(db, execution_id, input_data)
 
         try:
@@ -67,23 +78,17 @@ class MemoryWorker(BaseWorker):
             # Synthesize results into coherent answer
             synthesis = await self._synthesize_memories(query, results, db)
 
-            task.output_data = {
+            output = {
                 "query": query,
                 "results": results,
                 "synthesis": synthesis,
                 "total_matches": sum(len(v) for v in results.values() if isinstance(v, list))
             }
-            task.status = "completed"
-            await db.commit()
-            await db.refresh(task)
-            return task
+            tokens = self._estimate_tokens(str(output))
+            return await self._complete_task(db, task, output, tokens, start_time)
 
         except Exception as e:
-            task.status = "failed"
-            task.error = str(e)
-            await db.commit()
-            await db.refresh(task)
-            return task
+            return await self._fail_task(db, task, str(e), start_time)
 
     async def _search_episodic(
         self,
@@ -278,7 +283,7 @@ Forneça uma resposta sintetizada em JSON:
 
         response = await self._call_llm(
             prompt=prompt,
-            model="GOOGLE",
+            model=self.default_model,
             schema={
                 "type": "object",
                 "properties": {

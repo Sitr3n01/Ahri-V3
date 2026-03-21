@@ -22,6 +22,8 @@ export interface ChatRequest {
   pdfs?: FileAttachment[];
   mode: 'default' | 'web_search' | 'lore_search';
   model: string;
+  reasoning_level?: string;
+  enable_thinking?: boolean;
 }
 
 export interface ChatResponse {

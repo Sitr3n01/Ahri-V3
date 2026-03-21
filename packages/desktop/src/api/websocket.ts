@@ -126,7 +126,8 @@ export class ChatWebSocket {
     images: string[] = [],
     video?: { data: string; name: string },
     pdfs?: { data: string; name: string }[],
-    mode: 'default' | 'web_search' | 'lore_search' = 'default'
+    mode: 'default' | 'web_search' | 'lore_search' = 'default',
+    reasoning?: { reasoning_level?: string; enable_thinking?: boolean }
   ) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       this.onError('WebSocket not connected');
@@ -146,6 +147,8 @@ export class ChatWebSocket {
         video,
         pdfs,
         mode,
+        reasoning_level: reasoning?.reasoning_level,
+        enable_thinking: reasoning?.enable_thinking,
       }),
     );
   }

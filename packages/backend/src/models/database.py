@@ -68,6 +68,8 @@ class ChatSession(Base):
     persona_name = Column(String(50), nullable=False, index=True)
     title = Column(String(200), default="")
     original_filename = Column(String(200), default="")  # Para referência durante migração
+    compacted_summary = Column(Text, default="")          # Summary of compacted older messages
+    compacted_up_to = Column(Integer, default=0)           # order_index up to which messages were compacted
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -227,6 +229,14 @@ from typing import AsyncGenerator
 # ... imports
 
 # ...
+
+def async_session_factory():
+    """Returns a new async session for use outside FastAPI dependency injection.
+    Used by background tasks that need their own DB session lifecycle."""
+    if _session_factory is None:
+        raise RuntimeError("Database not initialized. Call init_db() first.")
+    return _session_factory()
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency injection para FastAPI - retorna uma sessão async."""

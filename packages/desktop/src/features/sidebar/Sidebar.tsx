@@ -13,9 +13,11 @@ import type { AppMode } from '@/App';
 
 interface SidebarProps {
   mode: AppMode;
+  setMode?: (mode: AppMode) => void;
+  previousMode?: AppMode;
 }
 
-export function Sidebar({ mode }: SidebarProps) {
+export function Sidebar({ mode, setMode, previousMode = 'chat' }: SidebarProps) {
   const activePersona = usePersonaStore((s) => s.activePersona);
   const personas = usePersonaStore((s) => s.personas);
   const syncPersonaByMusic = usePersonaStore((s) => s.syncPersonaByMusic);
@@ -75,8 +77,10 @@ export function Sidebar({ mode }: SidebarProps) {
   // ─── CHAT MODE SIDEBAR ──────────────────────────────────────
   if (mode === 'chat') {
     return (
-      <aside className="chat-sidebar h-full flex flex-col">
-        {/* Logo */}
+      <aside className="chat-sidebar h-full flex flex-col relative overflow-hidden">
+        {/* Content wrapper with key={mode} for CSS fade animations on switch */}
+        <div key={mode} className="flex flex-col h-full w-full animate-fade-in">
+          {/* Logo */}
         <div className="px-4 pt-3 pb-2">
           <div className="flex items-center gap-2">
             <span
@@ -304,6 +308,19 @@ export function Sidebar({ mode }: SidebarProps) {
                 </svg>
               )}
             </button>
+            {/* Settings Button */}
+            {setMode && (
+            <button 
+              onClick={() => setMode('settings')} 
+              className="chat-sidebar-icon-btn" 
+              title={t('nav.settings')}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </button>
+            )}
             {/* Logout */}
             <button onClick={logout} className="chat-sidebar-icon-btn" title={t('nav.logout')}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -314,6 +331,7 @@ export function Sidebar({ mode }: SidebarProps) {
             </button>
           </div>
         </div>
+      </div>
       </aside>
     );
   }
@@ -339,36 +357,31 @@ export function Sidebar({ mode }: SidebarProps) {
   };
 
   return (
-    <aside className="chat-sidebar h-full flex flex-col">
-      {/* Header */}
-      <div className="px-4 pt-3 pb-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span
-              className="text-lg font-bold tracking-tight persona-logo-text"
-              style={{
-                '--logo-primary': theme.primary,
-                '--logo-secondary': theme.secondary,
-              } as React.CSSProperties}
-            >
-              {personas.find(p => p.name === activePersona)?.display_name || 'Ahri'}
-            </span>
-          </div>
+    <aside className="chat-sidebar h-full flex flex-col relative overflow-hidden">
+      {/* Content wrapper with key={mode} for CSS fade animations on switch */}
+      <div key={mode} className="flex flex-col h-full w-full animate-fade-in">
+        {/* Header */}
+      <div className="px-4 pt-4 pb-2">
+        <div className="flex items-center">
           <button
             onClick={toggleAgentPanel}
-            className="chat-sidebar-icon-btn relative"
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg transition-colors w-full border border-transparent hover:border-[var(--glass-border)]"
+            style={{ background: 'var(--surface-hover)', color: 'var(--text-primary)' }}
             title="Agent Tasks"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <path d="M9 11h6M9 15h6" />
-            </svg>
-            {pendingTasks > 0 && (
-              <span
-                className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full"
-                style={{ background: 'var(--error)' }}
-              />
-            )}
+            <div className="relative flex-shrink-0">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <path d="M9 11h6M9 15h6" />
+              </svg>
+              {pendingTasks > 0 && (
+                <span
+                  className="absolute -top-1 -right-1 w-2 h-2 rounded-full shadow-sm"
+                  style={{ background: 'var(--error)' }}
+                />
+              )}
+            </div>
+            <span className="text-[0.8rem] font-semibold tracking-wide" style={{ color: 'var(--text-secondary)' }}>Painel de Agentes</span>
           </button>
         </div>
       </div>
@@ -478,9 +491,10 @@ export function Sidebar({ mode }: SidebarProps) {
 
       {/* Bottom bar — controls */}
       <div className="px-3 py-2 flex-shrink-0" style={{ borderTop: '1px solid var(--glass-border)' }}>
-        <div className="flex items-center gap-1">
-          {/* Theme toggle */}
-          <button
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1">
+            {/* Theme toggle */}
+            <button
             onClick={toggleTheme}
             className="chat-sidebar-icon-btn"
             title={appTheme === 'dark' ? t('common.theme_light') : t('common.theme_dark')}
@@ -496,6 +510,21 @@ export function Sidebar({ mode }: SidebarProps) {
               </svg>
             )}
           </button>
+          
+          {/* Settings Button */}
+          {setMode && (
+          <button 
+            onClick={() => setMode('settings')} 
+            className="chat-sidebar-icon-btn" 
+            title={t('nav.settings')}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
+          )}
+
           {/* Logout */}
           <button onClick={logout} className="chat-sidebar-icon-btn" title={t('nav.logout')}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -504,7 +533,9 @@ export function Sidebar({ mode }: SidebarProps) {
               <line x1="21" y1="12" x2="9" y2="12" />
             </svg>
           </button>
+          </div>
         </div>
+      </div>
       </div>
     </aside>
   );

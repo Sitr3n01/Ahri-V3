@@ -23,6 +23,15 @@ from src.services.workers.base_worker import BaseWorker
 class ShellWorker(BaseWorker):
     """Worker for shell command execution and file operations."""
 
+    ROLE_PROMPT = (
+        "[ROLE: System Operations Agent]\n"
+        "You execute file operations and shell commands safely.\n"
+        "NEVER run destructive commands (rm -rf, format, dd, etc.).\n"
+        "Always validate paths before operations. Report exact output.\n"
+        "For file reads: return content. For writes: confirm success.\n"
+        "Output: JSON with 'success', 'output', and 'path' fields."
+    )
+
     # Comandos bloqueados por segurança
     BLOCKED_COMMANDS = {
         "rm", "del", "format", "mkfs", "dd",  # Destrutivos
@@ -40,7 +49,7 @@ class ShellWorker(BaseWorker):
         super().__init__(
             llm_service=llm_service,
             worker_type="Shell",
-            default_model="GOOGLE"
+            default_model="LITE"
         )
 
     async def execute(
@@ -63,6 +72,8 @@ class ShellWorker(BaseWorker):
         """
         operation = input_data.get("operation", "command")
 
+        import time
+        start_time = time.time()
         task = await self._create_task_record(db, execution_id, input_data)
 
         try:
@@ -81,18 +92,11 @@ class ShellWorker(BaseWorker):
             else:
                 raise ValueError(f"Unknown operation: {operation}")
 
-            task.output_data = result
-            task.status = "completed"
-            await db.commit()
-            await db.refresh(task)
-            return task
+            tokens = self._estimate_tokens(str(result))
+            return await self._complete_task(db, task, result, tokens, start_time)
 
         except Exception as e:
-            task.status = "failed"
-            task.error = str(e)
-            await db.commit()
-            await db.refresh(task)
-            return task
+            return await self._fail_task(db, task, str(e), start_time)
 
     async def _execute_command(self, input_data: Dict, db: AsyncSession) -> Dict[str, Any]:
         """Execute shell command with safety validation."""
@@ -116,7 +120,7 @@ Comandos destrutivos (rm -rf, format, etc) devem ser marcados como dangerous.
 
         safety_check = await self._call_llm(
             prompt=safety_prompt,
-            model="GOOGLE",
+            model=self.default_model,
             schema={
                 "type": "object",
                 "properties": {

@@ -141,9 +141,6 @@ export function PersonaDrawer() {
             <div
                 className={`persona-drawer-content ${isOpen ? 'open' : ''}`}
                 ref={contentRef}
-                style={{
-                    maxHeight: isOpen ? '420px' : '0px',
-                }}
             >
                 <div className="persona-drawer-list">
                     {personas.filter((p) => p.name !== activePersona).map((p) => {
@@ -171,6 +168,8 @@ export function PersonaDrawer() {
                                         alt={p.display_name}
                                         className="persona-drawer-item-image"
                                         style={{ objectPosition: getImagePosition(p.name) }}
+                                        loading="lazy"
+                                        decoding="async"
                                         draggable={false}
                                         onError={(e) => {
                                             const target = e.target as HTMLImageElement;

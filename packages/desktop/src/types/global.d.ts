@@ -11,6 +11,12 @@ interface AhriAPI {
     getSystemInfo: () => Promise<Record<string, unknown>>;
     readClipboard: () => Promise<string>;
     writeClipboard: (text: string) => Promise<void>;
+    // Agent Mode v2
+    selectDirectory: () => Promise<string | null>;
+    getRecentDirs: () => Promise<string[]>;
+    addRecentDir: (dir: string) => Promise<string[]>;
+    openTerminal: (dir: string) => Promise<{ success: boolean }>;
+    openEditor: (dir: string) => Promise<{ success: boolean }>;
   };
   window: {
     minimize: () => Promise<void>;
@@ -22,6 +28,16 @@ interface AhriAPI {
     stop: () => Promise<{ success: boolean }>;
     status: () => Promise<{ enabled: boolean }>;
     onPersonaSwitched: (callback: (persona: string) => void) => void;
+  };
+  settings: {
+    getHwAccel: () => Promise<boolean>;
+    setHwAccel: (enabled: boolean) => Promise<{ requiresRestart: boolean }>;
+    restartApp: () => Promise<void>;
+    getGpuInfo: () => Promise<{
+      featureStatus: Record<string, string>;
+      gpuInfo: unknown;
+      hardwareAcceleration: boolean;
+    }>;
   };
 }
 
