@@ -1,6 +1,6 @@
 """
 Router Worker - Specialized agent for task classification and worker selection.
-Uses FunctionGemma 270M for ultra-fast, efficient task routing.
+Uses the configured agent model for task classification and routing.
 
 Capabilities:
 - Classify user tasks into categories
@@ -18,6 +18,8 @@ from src.services.workers.base_worker import BaseWorker
 
 class RouterWorker(BaseWorker):
     """Worker for intelligent task routing and classification."""
+
+    ENABLE_EVALUATION = False  # Classification is one-shot, no retry benefit
 
     ROLE_PROMPT = (
         "[ROLE: Task Router & Classifier]\n"
@@ -165,8 +167,7 @@ Retorne em JSON:
 }}
 """
 
-        # Use lightweight model for routing (Function Gemma 270M would be ideal)
-        # Fallback to Gemma 3 4B for now
+        # Use lightweight model for fast routing
         response = await self._call_llm(
             prompt=prompt,
             model=self.default_model,

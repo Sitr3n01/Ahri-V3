@@ -3,12 +3,17 @@ import { useAgentModeStore } from '@/stores/agent-mode-store';
 import type { GeminiReasoningLevel } from '@ahri/shared';
 
 const REASONING_LEVELS: { id: GeminiReasoningLevel; label: string; desc: string }[] = [
+  { id: 'off', label: 'Off', desc: 'Sem raciocínio' },
   { id: 'low', label: 'Baixo', desc: '~1K tokens' },
   { id: 'medium', label: 'Médio', desc: '~8K tokens' },
   { id: 'high', label: 'Alto', desc: '~24K tokens' },
 ];
 
-export function AgentReasoningSelector() {
+interface AgentReasoningSelectorProps {
+  theme: { primary: string; secondary: string; shadow: string };
+}
+
+export function AgentReasoningSelector({ theme }: AgentReasoningSelectorProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -37,16 +42,10 @@ export function AgentReasoningSelector() {
       <div className="relative" ref={menuRef}>
         <button
           onClick={() => setEnableThinking(!enableThinking)}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full transition-all duration-300 hover:bg-white/5 border border-transparent hover:border-white/10"
-          style={{
-            fontSize: '0.8rem',
-            fontFamily: 'var(--font-sans)',
-            fontWeight: 500,
-            color: enableThinking ? '#F97316' : 'var(--text-secondary)', // Qwen orange
-          }}
+          className="flex items-center gap-1 px-2 py-1 rounded-full transition-all duration-300 hover:bg-white/5 border border-transparent"
           title="Raciocínio Ativo/Desativado"
         >
-          <span>Pensamento: {enableThinking ? 'Ligado' : 'Desligado'}</span>
+          <span className="text-[0.7rem]">{enableThinking ? 'Thinking' : 'Off'}</span>
         </button>
       </div>
     );
@@ -54,25 +53,24 @@ export function AgentReasoningSelector() {
 
   // Se for Gemini (Flash Lite):
   if (selectedModel === 'gemini-flash-lite') {
-    const effectiveLevel = reasoningLevel === 'off' ? 'low' : reasoningLevel;
-    const currentLabel = REASONING_LEVELS.find(l => l.id === effectiveLevel)?.label || 'Baixo';
+    const currentLabel = REASONING_LEVELS.find(l => l.id === reasoningLevel)?.label || 'Off';
 
     return (
       <div className="relative" ref={menuRef}>
         <button
           onClick={() => setOpen(!open)}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full transition-all duration-300 hover:bg-white/5 border border-transparent hover:border-white/10"
+          className="flex items-center gap-1 px-2 py-1 rounded-full transition-all duration-300 hover:bg-white/5 border border-transparent"
           style={{
-            fontSize: '0.8rem',
+            fontSize: '0.7rem',
             fontFamily: 'var(--font-sans)',
             fontWeight: 500,
             color: 'var(--text-secondary)',
           }}
         >
-          <span>Pensamento: {currentLabel}</span>
+          <span>{currentLabel}</span>
           <svg
-            width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-            className={`opacity-50 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+            width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"
+            className={`opacity-40 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
           >
             <polyline points="6 9 12 15 18 9" />
           </svg>

@@ -174,6 +174,16 @@ function registerAgentIPC() {
         await fs.promises.writeFile(resolved, content, 'utf-8');
         return { success: true };
     });
+    ipcMain.handle('agent:delete-file', async (_event, filePath) => {
+        if (typeof filePath !== 'string' || !filePath)
+            throw new Error('Invalid path');
+        const resolved = validateDataPath(filePath);
+        // Use fs.promises.unlink to delete the file
+        if (fs.existsSync(resolved)) {
+            await fs.promises.unlink(resolved);
+        }
+        return { success: true };
+    });
     ipcMain.handle('agent:list-dir', async (_event, dirPath) => {
         if (typeof dirPath !== 'string' || !dirPath)
             throw new Error('Invalid path');
@@ -218,6 +228,7 @@ function registerAgentIPC() {
         const rootDir = path.resolve(__dirname, '..', '..', '..');
         return {
             root: rootDir,
+            backend: path.join(rootDir, 'packages', 'backend'),
             data: path.join(rootDir, 'data'),
             personas: path.join(rootDir, 'data', 'personas'),
         };
@@ -346,7 +357,6 @@ function createWindow() {
         minWidth: 800,
         minHeight: 600,
         backgroundColor: '#06040c',
-        show: false,
         titleBarStyle: 'hidden',
         titleBarOverlay: {
             color: '#06040c',
@@ -359,6 +369,7 @@ function createWindow() {
             nodeIntegration: false,
             backgroundThrottling: false,
         },
+        show: true, // Keep immediate show for dev visibility
     });
     // Log console messages from renderer to terminal
     mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {

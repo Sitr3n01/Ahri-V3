@@ -27,7 +27,7 @@
   --surface-solid: #12101e;
   --glass-border: rgba(255, 255, 255, 0.08);
   --glass-shine: rgba(255, 255, 255, 0.05);
-  --msg-ai-bg: rgba(18, 16, 30, 0.82);
+  --msg-ai-bg: rgba(18, 16, 30, 0.75);
   --msg-ai-text: #e2e8f0;
   --code-bg: rgba(8, 6, 16, 0.75);
   --token-track: rgba(255, 255, 255, 0.10);
@@ -104,7 +104,7 @@
   --surface-solid: #fcfaff;
   --glass-border: rgba(0, 0, 0, 0.08);
   --glass-shine: rgba(255, 255, 255, 0.9);
-  --msg-ai-bg: rgba(252, 250, 255, 0.65);
+  --msg-ai-bg: rgba(252, 250, 255, 0.85);
   --msg-ai-text: #1e293b;
   --code-bg: rgba(250, 250, 250, 0.50);
   --token-track: rgba(0, 0, 0, 0.08);
@@ -307,6 +307,24 @@
 
 [data-theme="light"] .settings-key-toggle:hover {
   border-color: rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="light"] .settings-toggle-switch {
+  background: rgba(0, 0, 0, 0.08);
+  border-color: rgba(0, 0, 0, 0.15);
+}
+
+[data-theme="light"] .settings-toggle-switch:hover {
+  background: rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="light"] .settings-toggle-knob {
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+[data-theme="light"] .settings-toggle-row + .settings-toggle-row {
+  border-top-color: rgba(0, 0, 0, 0.08);
 }
 
 /* Light mode agent input */
@@ -772,22 +790,26 @@ select:focus-visible {
   max-width: 90%;
   position: relative;
   z-index: 2;
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
   animation: fadeInUp 0.4s ease-out forwards;
 }
 
 /* Assistant message bubble (left side, V2 glass style) */
 .chat-bubble-assistant {
   border-radius: 20px 20px 20px 4px;
-  background: var(--msg-ai-bg);
+  background: color-mix(in srgb, var(--msg-ai-bg) 96%, #fff);
   color: var(--msg-ai-text);
   border: 1px solid var(--glass-border);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
+  box-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.12),
+    inset 0 1px 1px rgba(255, 255, 255, 0.05);
   padding: 12px 18px;
   font-size: 0.95rem;
   line-height: 1.6;
-  backdrop-filter: blur(15px) saturate(140%);
-  -webkit-backdrop-filter: blur(15px) saturate(140%);
-  max-width: 90%;
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  max-width: 85%;
   position: relative;
   z-index: 2;
   animation: fadeInUp 0.4s ease-out forwards;
@@ -822,9 +844,14 @@ select:focus-visible {
 /* Error message bubble */
 .chat-bubble-error {
   border-radius: 20px 20px 20px 4px;
-  background: color-mix(in srgb, var(--error) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--error) 25%, transparent);
-  padding: 12px 16px;
+  background: color-mix(in srgb, var(--error) 12%, rgba(40, 20, 20, 0.55));
+  border: 1px solid color-mix(in srgb, var(--error) 35%, transparent);
+  padding: 14px 18px;
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: 
+    0 8px 32px rgba(239, 68, 68, 0.1),
+    inset 0 1px 1px rgba(255, 255, 255, 0.05);
 }
 
 /* ============================================================
@@ -992,30 +1019,21 @@ select:focus-visible {
 }
 
 /* ============================================================
-   Typing Indicator (V2)
+   Typing Indicator (V2 Refined)
    ============================================================ */
 
-.typing-indicator {
-  display: flex;
-  gap: 4px;
-  padding: 12px 16px;
+.chat-bubble-none {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  padding: 0 !important;
+  min-height: auto !important;
 }
 
-.typing-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--persona-primary);
-  animation: typingBounce 1.4s ease-in-out infinite;
-  will-change: transform;
-}
-
-.typing-dot:nth-child(2) { animation-delay: 0.2s; }
-.typing-dot:nth-child(3) { animation-delay: 0.4s; }
-
-@keyframes typingBounce {
-  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-  30% { transform: translateY(-6px); opacity: 1; }
+/* Old typing indicators removed in favor of premium text-only mode */
+.typing-indicator, .typing-dot {
+  display: none;
 }
 
 /* ============================================================
@@ -1860,6 +1878,49 @@ select:focus-visible {
    Settings Panel Styles
    ============================================================ */
 
+.settings-workers-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.settings-worker-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: default;
+}
+
+.settings-worker-card:hover {
+  background: color-mix(in srgb, var(--persona-primary) 8%, rgba(255, 255, 255, 0.05));
+  border-color: color-mix(in srgb, var(--persona-primary) 30%, transparent);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px color-mix(in srgb, var(--persona-shadow) 15%, transparent);
+}
+
+.settings-worker-icon {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--persona-primary);
+  transition: all 0.3s ease;
+  opacity: 0.8;
+}
+
+.settings-worker-card:hover .settings-worker-icon {
+  color: var(--persona-primary);
+  opacity: 1;
+  transform: scale(1.1);
+}
+
 .settings-header {
   padding: 32px 32px 0 32px;
   background: color-mix(in srgb, var(--sidebar-bg) 40%, transparent);
@@ -1951,10 +2012,6 @@ select:focus-visible {
 @keyframes fadeInSlide {
   from { opacity: 0; transform: translateY(-6px) scale(0.95); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-.settings-section {
-  /* gap handled by panel */
 }
 
 .settings-section-header {
@@ -2139,6 +2196,78 @@ select:focus-visible {
   to { transform: scale(1); opacity: 1; }
 }
 
+/* Settings Toggle Switch */
+.settings-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  cursor: pointer;
+}
+
+.settings-toggle-row + .settings-toggle-row {
+  border-top: 1px solid var(--glass-border);
+}
+
+.settings-toggle-switch {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  min-width: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.settings-toggle-switch:hover {
+  border-color: color-mix(in srgb, var(--persona-primary) 40%, var(--glass-border));
+  background: rgba(255, 255, 255, 0.12);
+}
+
+@keyframes shakeError {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-4px); }
+  40%, 80% { transform: translateX(4px); }
+}
+
+.animate-shake {
+  animation: shakeError 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+.settings-toggle-switch.active {
+  background: var(--persona-primary);
+  border-color: var(--persona-primary);
+  box-shadow: 0 0 12px var(--persona-shadow);
+}
+
+.settings-toggle-switch.active:hover {
+  background: color-mix(in srgb, var(--persona-primary) 90%, #fff);
+  border-color: color-mix(in srgb, var(--persona-primary) 90%, #fff);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--persona-shadow) 50%, transparent);
+}
+
+.settings-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.7);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.settings-toggle-switch.active .settings-toggle-knob {
+  left: 22px;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
 /* Settings Buttons */
 .settings-actions {
   display: flex;
@@ -2311,3 +2440,210 @@ select:focus-visible {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Settings Persona List (Ultrawide) - Replicates chat sidebar drawer design */
+.settings-persona-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px; /* Increased to match header padding for better centering */
+}
+
+.settings-persona-card {
+  width: 100%;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+  border-radius: 12px;
+  overflow: hidden;
+  background: transparent;
+  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  text-align: left;
+}
+
+.settings-persona-card:hover {
+  /* Restored subtle scale but keeping it centered (no translation) */
+  transform: scale(1.02);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.settings-persona-image-container {
+  position: relative;
+  width: 100%;
+  height: 68px; /* High fidelity ultrawide */
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  transition: all 0.4s ease;
+  background: rgba(0,0,0,0.1);
+}
+
+.settings-persona-card.active .settings-persona-image-container {
+  border-color: color-mix(in srgb, var(--persona-color) 60%, transparent);
+  box-shadow: 
+    0 4px 20px rgba(0, 0, 0, 0.4),
+    0 0 15px color-mix(in srgb, var(--persona-color) 25%, transparent);
+}
+
+.settings-persona-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  will-change: transform;
+}
+
+.settings-persona-card:hover .settings-persona-image {
+  filter: brightness(1.1);
+  /* Removed scale here too to keep proportions perfect as requested */
+}
+
+.settings-persona-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to right, 
+    rgba(0, 0, 0, 0.85) 0%, 
+    rgba(0, 0, 0, 0.35) 50%, 
+    transparent 100%);
+  transition: opacity 0.35s ease;
+}
+
+.settings-persona-info {
+  position: absolute;
+  inset: 0;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.settings-persona-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: white;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+  letter-spacing: 0.2px;
+}
+
+.settings-persona-id {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: rgba(255,255,255,0.55);
+  text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+  margin-top: 1px;
+}
+
+.settings-persona-active-indicator {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--persona-color);
+  box-shadow: 
+    0 0 12px var(--persona-color),
+    0 0 24px color-mix(in srgb, var(--persona-color) 40%, transparent);
+  z-index: 3;
+  border-radius: 0 2px 2px 0;
+}
+
+.settings-persona-card.active {
+  z-index: 10;
+}
+
+/* Unified Settings Block */
+.settings-unified-container {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  border-radius: 24px;
+  /* overflow: hidden removed to allow color picker bubble to overflow */
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.settings-unified-section {
+  padding: 24px;
+}
+
+.settings-unified-section:not(:last-child) {
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.settings-unified-section-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.settings-unified-section-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.settings-unified-section-desc {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.settings-inner-grid {
+  display: grid;
+  gap: 20px;
+}
+
+/* Persona Files Panel Styles */
+.persona-file-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  padding: 16px;
+  transition: all 0.3s ease;
+}
+
+.persona-file-card:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-medium);
+}
+
+.persona-file-action-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px;
+  min-width: 64px;
+  border-radius: 10px;
+  color: var(--text-tertiary);
+  transition: all 0.2s ease;
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.persona-file-action-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  border-color: var(--glass-border);
+}
+
+.persona-file-action-btn:hover svg {
+  color: var(--persona-primary);
+}
+
+/* ============================================================
+   Markdown Override for Narrative Blocks
+   ============================================================ */
+.markdown-override p { margin-bottom: 0.5em; }
+.markdown-override h1, .markdown-override h2, .markdown-override h3 { margin-top: 1em; margin-bottom: 0.5em; font-weight: 600; color: var(--text-primary); }
+.markdown-override h1 { font-size: 1.1em; }
+.markdown-override h2 { font-size: 1.05em; }
+.markdown-override ul { list-style-type: disc; padding-left: 1.5em; margin-bottom: 0.5em; }
+.markdown-override ol { list-style-type: decimal; padding-left: 1.5em; margin-bottom: 0.5em; }
+.markdown-override li { margin-bottom: 0.25em; }
+.markdown-override strong { font-weight: 600; color: var(--text-primary); }

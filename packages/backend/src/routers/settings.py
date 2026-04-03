@@ -2,16 +2,27 @@
 Settings: gerenciar configurações globais da aplicação (Environment Variables).
 """
 import os
+import logging
 from pathlib import Path
+from typing import List, Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic_settings import BaseSettings
+from pydantic import BaseModel, Field
 
+from google import genai
 from src.config import get_settings, Settings
 from src.dependencies import AuthDep
-from src.models.schemas import SettingsSchema, UpdateSettingsRequest, AvailableModelSchema
+from src.models.schemas import (
+    SettingsSchema, 
+    UpdateSettingsRequest, 
+    AvailableModelSchema,
+    GoogleModelInfo,
+    GoogleModelCheckResponse
+)
 
 router = APIRouter()
+logger = logging.getLogger("ahri.settings")
 
 @router.get("", response_model=SettingsSchema)
 async def get_app_settings(auth: AuthDep):
@@ -23,6 +34,13 @@ async def get_app_settings(auth: AuthDep):
         gemini_api_key_free=s.gemini_api_key_free,
         openrouter_api_key=s.openrouter_api_key,
         openrouter_model_name=s.openrouter_model_name,
+        google_model_pro=s.google_model_pro,
+        google_model_flash=s.google_model_flash,
+        google_model_lite=s.google_model_lite,
+        google_model_vision=s.google_model_vision,
+        google_model_search=s.google_model_search,
+        google_model_memory=s.google_model_memory,
+        ollama_chat_model=s.ollama_chat_model,
         cse_api_key=s.cse_api_key,
         cse_cx=s.cse_cx,
         spotipy_client_id=s.spotipy_client_id,
@@ -38,7 +56,6 @@ async def get_app_settings(auth: AuthDep):
         google_api_key_search=s.google_api_key_search,
         google_api_key_search_b=s.google_api_key_search_b,
         google_ai_studio_api_key=s.google_ai_studio_api_key,
-        google_ai_studio_tpm_limit=s.google_ai_studio_tpm_limit,
         deepinfra_api_key=s.deepinfra_api_key,
         gh_token=s.gh_token,
         gist_id=s.gist_id,
@@ -122,6 +139,7 @@ def _update_env_file(root_dir: Path, updates: dict):
                 val_str = f'"{val_str}"'
             new_lines.append(f"{env_key}={val_str}")
             
+    logger.info(f"Updating .env at {env_path} with {len(updates)} keys: {list(updates.keys())}")
     env_path.write_text("\n".join(new_lines), encoding="utf-8")
 
 
@@ -138,6 +156,7 @@ async def update_app_settings(request: UpdateSettingsRequest, auth: AuthDep):
     try:
         _update_env_file(root_dir, updates)
     except Exception as e:
+        print(f"CRITICAL: Failed to update .env: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to update .env: {e}")
         
     # 2. Force settings reload
@@ -171,16 +190,12 @@ _MODEL_COLORS = {
     "gemini-2.0-flash-lite": "#60A5FA",
     "gemini-1.5-pro": "#A78BFA",
     "gemini-1.5-flash": "#67E8F9",
-    "gemma-3-27b-it": "#2563EB",
 }
 
 
 @router.get("/models/available", response_model=list[AvailableModelSchema])
 async def get_available_models(auth: AuthDep):
     """Retorna lista completa de modelos para chat.
-
-    FLASH (Gemini 2.5 Flash) é usado apenas internamente por workers do agent mode
-    (pesquisa, visão, análise). Não aparece como opção de chat.
     """
     models: list[AvailableModelSchema] = [
         AvailableModelSchema(
@@ -204,3 +219,40 @@ async def get_available_models(auth: AuthDep):
     ]
 
     return models
+
+
+class GoogleModelCheckRequest(BaseModel):
+    api_key: str | None = None
+
+
+@router.post("/check-google-models", response_model=GoogleModelCheckResponse)
+async def check_google_models(request: GoogleModelCheckRequest, auth: AuthDep):
+    """Lista modelos disponíveis do Google para a chave fornecida."""
+    api_key = request.api_key
+    
+    if not api_key:
+        s = get_settings()
+        api_key = s.gemini_api_key_paid or s.gemini_api_key_free or s.google_ai_studio_api_key
+        
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API Key is required or must be configured.")
+        
+    try:
+        client = genai.Client(api_key=api_key)
+        # Lista modelos
+        # O novo SDK retorna um iterador de objetos Model
+        models_list = []
+        for m in client.models.list():
+            # Filtra apenas o que interessa (como no script V2)
+            # No SDK novo (1.0+) o atributo é 'supported_actions'
+            if m.supported_actions and 'generateContent' in m.supported_actions:
+                models_list.append(GoogleModelInfo(
+                    name=m.name,
+                    display_name=m.display_name,
+                    supported_generation_methods=m.supported_actions
+                ))
+        
+        return GoogleModelCheckResponse(models=models_list)
+    except Exception as e:
+        logger.error(f"Error checking Google models: {e}")
+        raise HTTPException(status_code=500, detail=f"Error connecting to Google: {str(e)}")

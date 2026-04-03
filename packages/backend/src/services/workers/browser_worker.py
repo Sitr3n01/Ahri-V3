@@ -10,7 +10,10 @@ Capabilities:
 - Take screenshots
 - Handle JavaScript-heavy sites
 """
+import logging
 from typing import Any, Dict, List
+
+logger = logging.getLogger("ahri.worker.browser")
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.database import AgentWorkerTask
@@ -149,8 +152,8 @@ class BrowserWorker(BaseWorker):
         # Wait for navigation if triggered
         try:
             await page.wait_for_load_state("networkidle", timeout=5000)
-        except:
-            pass
+        except Exception:
+            logger.debug("networkidle wait timed out after click, continuing")
 
         return {
             "clicked": True,
@@ -169,12 +172,14 @@ class BrowserWorker(BaseWorker):
 
         # Fill each field
         filled_fields = []
+        failed_fields = []
         for selector, value in form_data.items():
             try:
                 await page.fill(selector, str(value))
                 filled_fields.append(selector)
             except Exception as e:
-                filled_fields.append(f"{selector} (failed: {str(e)})")
+                logger.warning(f"Failed to fill form field '{selector}': {e}")
+                failed_fields.append(f"{selector}: {str(e)}")
 
         # Submit if requested
         submitted = False
@@ -183,9 +188,11 @@ class BrowserWorker(BaseWorker):
             await page.wait_for_load_state("networkidle", timeout=10000)
             submitted = True
 
+        all_succeeded = len(failed_fields) == 0
         return {
-            "form_filled": True,
+            "form_filled": all_succeeded,
             "fields_filled": filled_fields,
+            "fields_failed": failed_fields,
             "submitted": submitted,
             "current_url": page.url
         }
@@ -208,7 +215,8 @@ class BrowserWorker(BaseWorker):
                         extracted[key] = await element.text_content()
                     else:
                         extracted[key] = None
-                except:
+                except Exception as e:
+                    logger.warning(f"Failed to extract '{key}' with selector '{selector}': {e}")
                     extracted[key] = None
 
             return {

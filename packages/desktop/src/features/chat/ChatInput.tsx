@@ -121,13 +121,17 @@ export function ChatInput() {
   const [isDragging, setIsDragging] = useState(false);
   const [searchMode, setSearchMode] = useState<SearchMode>('default');
   const [isFocused, setIsFocused] = useState(false);
+  const [errorBanner, setErrorBanner] = useState<{ msg: string; id: number } | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
 
   const isStreaming = useChatStore((s) => s.isStreaming);
+  const streamingEnabled = useChatStore((s) => s.streamingEnabled);
   const sendMessageStreaming = useChatStore((s) => s.sendMessageStreaming);
+  const stopStreaming = useChatStore((s) => s.stopStreaming);
+  const sendMessageHttp = useChatStore((s) => s.sendMessage);
   const activePersona = usePersonaStore((s) => s.activePersona);
   const personas = usePersonaStore((s) => s.personas);
 
@@ -150,6 +154,19 @@ export function ChatInput() {
     const trimmed = text.trim();
     if ((!trimmed && attachments.length === 0) || isStreaming) return;
 
+    const { internetSearchEnabled, globalEnableThinking, enableThinking, model } = useChatStore.getState();
+
+    if (searchMode === 'web_search' && !internetSearchEnabled) {
+      setErrorBanner({ msg: 'A Busca Web está bloqueada. Habilite "Pesquisa na Web" no menu principal de Configurações primeiro.', id: Date.now() });
+      return;
+    }
+    if (model === 'LOCAL' && enableThinking && !globalEnableThinking) {
+      setErrorBanner({ msg: 'Raciocínio bloqueado. Habilite "Raciocínio (Modelos Locais)" no menu principal de Configurações.', id: Date.now() });
+      return;
+    }
+
+    setErrorBanner(null);
+
     // Slash commands
     if (trimmed.startsWith('/')) {
       await handleSlashCommand(trimmed);
@@ -158,13 +175,14 @@ export function ChatInput() {
       return;
     }
 
-    sendMessageStreaming(trimmed, attachments, searchMode);
+    const send = streamingEnabled ? sendMessageStreaming : sendMessageHttp;
+    send(trimmed, attachments, searchMode);
     setText('');
     setAttachments([]);
     setSearchMode('default');
 
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
-  }, [text, attachments, searchMode, isStreaming, sendMessageStreaming]);
+  }, [text, attachments, searchMode, isStreaming, streamingEnabled, sendMessageStreaming, sendMessageHttp]);
 
   const handleSlashCommand = async (cmd: string) => {
     const { api } = await import('@/api/client');
@@ -300,6 +318,17 @@ export function ChatInput() {
     >
       {/* Composer Area */}
       <div className={`relative ${isDragging ? 'opacity-50' : ''}`}>
+        {errorBanner && (
+          <div key={errorBanner.id} className="absolute bottom-full left-0 right-0 mb-3 px-3 py-2 rounded-xl flex items-center justify-between text-[11px] font-semibold animate-shake shadow-lg z-50 backdrop-blur-md" style={{ background: 'color-mix(in srgb, var(--error) 15%, var(--surface-elevated))', border: '1px solid color-mix(in srgb, var(--error) 30%, transparent)', color: 'var(--error)' }}>
+            <div className="flex items-center gap-2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              <span>{errorBanner.msg}</span>
+            </div>
+            <button onClick={() => setErrorBanner(null)} className="hover:opacity-70 transition-opacity p-1">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+        )}
         {/* Plus Menu Popup (floating above, anchored right) */}
         {plusMenuOpen && (
           <div ref={plusMenuRef} className="absolute bottom-full left-0 mb-2 plus-menu animate-fade-in z-50 w-[220px]">
@@ -506,16 +535,19 @@ export function ChatInput() {
             <div className="flex items-center gap-2">
               <SpeedModeSelector />
 
-              {/* Sending button */}
+              {/* Sending / Stop button */}
               <button
-                onClick={handleSend}
-                disabled={(!text.trim() && attachments.length === 0) || isStreaming}
+                onClick={isStreaming ? stopStreaming : handleSend}
+                disabled={(!text.trim() && attachments.length === 0) && !isStreaming}
                 className={`flex items-center justify-center w-8 h-8 rounded-full transition-all duration-300 ${
-                  (text.trim() || attachments.length > 0) && !isStreaming
+                  (text.trim() || attachments.length > 0 || isStreaming)
                     ? 'bg-[var(--persona-primary)] text-white scale-100 hover:scale-110 shadow-md'
-                    : 'bg-[var(--surface-hover)] text-[var(--text-tertiary)] opacity-60 pointer-events-none'
+                    : 'bg-[var(--surface-hover)] text-[var(--text-tertiary)] opacity-60 pointer-events-none cursor-default'
                 }`}
-                title="Enviar"
+                style={{
+                  background: isStreaming ? 'var(--error)' : undefined
+                }}
+                title={isStreaming ? 'Parar Geração' : 'Enviar'}
               >
                 {isStreaming ? (
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">

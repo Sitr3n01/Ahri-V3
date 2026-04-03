@@ -1,10 +1,10 @@
 """
-OrchestratorService - Multi-agent task orchestration with Gemini/Gemma coordination.
+OrchestratorService - Multi-agent task orchestration with Gemini coordination.
 
 The orchestrator plans task decomposition, delegates to specialized workers,
 and synthesizes final results. Uses hybrid approach:
-- Gemini 2.5 Flash as orchestrator (native function calling, high reliability)
-- Gemma 3 workers for execution (low cost, specialized tasks)
+- Gemini Flash as orchestrator (native function calling, high reliability)
+- Configured agent model workers for execution (low cost, specialized tasks)
 """
 import asyncio
 import json
@@ -29,6 +29,12 @@ from .workers.web_worker import WebWorker
 from .workers.vision_worker import VisionWorker
 from .workers.browser_worker import BrowserWorker
 from .workers.router_worker import RouterWorker
+from .workers.dynamic_worker import DynamicWorker
+from .workers.context_manager import WorkerContextManager
+from .plan_cache import PlanCache
+from .event_log import (
+    EventType, get_or_create_log, cleanup_log, WORKER_FALLBACKS
+)
 
 logger = logging.getLogger("ahri.orchestrator")
 
@@ -64,11 +70,16 @@ class OrchestratorService:
             "Vision": VisionWorker(llm_service),
             "Browser": BrowserWorker(llm_service),
             "Router": RouterWorker(llm_service),
+            "Dynamic": DynamicWorker(llm_service),
         }
 
         # Runtime params set per-execution (not per-init)
         self._thinking_budget = 0
         self._enable_thinking = False
+
+        # Context engineering, plan caching, and event log
+        self._context_manager = WorkerContextManager()
+        self._plan_cache = PlanCache()
 
         # Semaphore to cap parallel worker execution
         self._semaphore = asyncio.Semaphore(self._max_parallel)
@@ -77,12 +88,14 @@ class OrchestratorService:
         self,
         db: AsyncSession,
         goal: str,
-        orchestrator_model: str = "PRO",
+        orchestrator_model: str,
         execution_id: Optional[int] = None,
         reasoning_level: str = "medium",
         enable_thinking: bool = False,
         internet_search_enabled: bool = False,
-    ) -> AgentExecution:
+        permission_mode: str = "auto",
+        agent_session_id: Optional[int] = None,
+    ) -> "AgentExecution":
         """
         Main orchestration loop.
 
@@ -95,6 +108,8 @@ class OrchestratorService:
             reasoning_level: Gemini thinking budget level (off/low/medium/high)
             enable_thinking: Qwen/Ollama thinking toggle
             internet_search_enabled: Whether Search worker is available
+            permission_mode: Permission mode (auto/plan_first/supervised)
+            agent_session_id: Session ID for memory context across executions
 
         Returns:
             Completed AgentExecution with result
@@ -119,7 +134,8 @@ class OrchestratorService:
             execution = AgentExecution(
                 goal=goal,
                 orchestrator_model=orchestrator_model,
-                status=AgentExecutionStatus.PLANNING
+                status=AgentExecutionStatus.PLANNING,
+                permission_mode=permission_mode,
             )
             db.add(execution)
             await db.commit()
@@ -127,27 +143,80 @@ class OrchestratorService:
 
         logger.info(f"[Orchestrator] Starting execution #{execution.id}: {goal[:100]}")
 
+        # Create event log for this execution (real-time WebSocket streaming)
+        event_log = get_or_create_log(execution.id)
+
         try:
+            # Step 1b: Inject session context (memory from previous executions)
+            planning_goal = goal
+            if agent_session_id:
+                session_context = await self._build_session_context(db, agent_session_id, execution.id)
+                if session_context:
+                    planning_goal = f"[Previous tasks in this session]\n{session_context}\n\n[Current task]\n{goal}"
+                    logger.info(f"[Orchestrator] Session context injected ({len(session_context)} chars)")
+
             # Step 2: Plan task decomposition (always uses flash-lite, independent of chat model)
-            plan = await self._plan_task(goal, "LITE")
+            plan = await self._plan_task(planning_goal, "LITE")
             execution.plan = plan
+            execution.status = AgentExecutionStatus.DELIBERATING
+            await db.commit()
+
+            event_log.emit(EventType.PLAN_CREATED, {
+                "steps_count": len(plan.get("steps", [])),
+                "reasoning": plan.get("reasoning", "")[:200],
+            })
+            logger.info(f"[Orchestrator] Plan created: {len(plan.get('steps', []))} steps")
+
+            # Step 2b: Deliberate on plan (multi-perspective analysis)
+            refined = await self._deliberate_on_plan(goal, plan)
+            if refined and refined.get("steps"):
+                plan["deliberation"] = refined.get("deliberation", "")
+                plan["refined_understanding"] = refined.get("refined_understanding", "")
+                plan["steps"] = refined["steps"]
+                execution.plan = plan
+            elif refined:
+                # Deliberation succeeded but didn't refine steps — store analysis only
+                if refined.get("deliberation"):
+                    plan["deliberation"] = refined["deliberation"]
+                if refined.get("refined_understanding"):
+                    plan["refined_understanding"] = refined["refined_understanding"]
+                execution.plan = plan
+
             execution.status = AgentExecutionStatus.RUNNING
             await db.commit()
 
-            logger.info(f"[Orchestrator] Plan created: {len(plan.get('steps', []))} steps")
+            if refined and refined.get("deliberation"):
+                event_log.emit(EventType.PLAN_DELIBERATED, {
+                    "deliberation": refined.get("deliberation", "")[:300],
+                    "refined_understanding": refined.get("refined_understanding", ""),
+                })
 
-            # Step 3: Execute workers (with parallelization support)
+            # Step 2b: If plan_first or supervised, pause for user approval
+            if permission_mode in ("plan_first", "supervised"):
+                execution.status = AgentExecutionStatus.AWAITING_APPROVAL
+                await db.commit()
+                logger.info(f"[Orchestrator] Execution #{execution.id} awaiting user approval (mode={permission_mode})")
+                return execution
+
+            # Step 3: Execute workers (with parallelization support + replanning)
             results = await self._execute_workers_with_dependencies(
-                db, execution.id, plan.get("steps", [])
+                db, execution.id, plan.get("steps", []), goal=goal,
+                event_log=event_log,
             )
 
             # Step 4: Synthesize final result (always uses flash-lite)
+            event_log.emit(EventType.SYNTHESIS_STARTED, {"steps_completed": len(results)})
             final_result = await self._synthesize_results(goal, plan, results, "LITE")
             execution.result = final_result
             execution.status = AgentExecutionStatus.COMPLETED
             execution.completed_at = datetime.utcnow()
             await db.commit()
 
+            # Record success in plan cache
+            self._plan_cache.record_outcome(goal, success=True)
+            event_log.emit(EventType.EXECUTION_COMPLETED, {
+                "result_length": len(final_result),
+            })
             logger.info(f"[Orchestrator] Execution #{execution.id} completed successfully")
             return execution
 
@@ -157,7 +226,18 @@ class OrchestratorService:
             execution.status = AgentExecutionStatus.FAILED
             execution.completed_at = datetime.utcnow()
             await db.commit()
+
+            # Record failure in plan cache
+            self._plan_cache.record_outcome(goal, success=False)
+            event_log.emit(EventType.EXECUTION_FAILED, {"error": str(e)[:300]})
             return execution
+
+        finally:
+            # Cleanup event log after a delay (let WebSocket clients drain events)
+            async def _delayed_cleanup():
+                await asyncio.sleep(30)
+                cleanup_log(execution.id)
+            asyncio.create_task(_delayed_cleanup())
 
     async def _plan_task(self, goal: str, model: str) -> dict:
         """
@@ -182,16 +262,26 @@ class OrchestratorService:
                 ]
             }
         """
+        # Check plan cache first (saves ~5K tokens + ~500ms per hit)
+        cached = self._plan_cache.get(goal)
+        if cached:
+            logger.info("[Orchestrator] Plan cache hit — reusing cached plan")
+            return cached
+
         # Use Gemini function calling for PRO model
         if model == "PRO":
             try:
-                return await self._plan_task_with_function_calling(goal)
+                plan = await self._plan_task_with_function_calling(goal)
+                self._plan_cache.store(goal, plan)
+                return plan
             except Exception as e:
                 logger.warning(f"[Orchestrator] Function calling failed, falling back to prompt-based: {e}")
                 # Fall through to prompt-based approach
 
         # Prompt-based planning (fallback or for other models)
-        return await self._plan_task_prompt_based(goal, model)
+        plan = await self._plan_task_prompt_based(goal, model)
+        self._plan_cache.store(goal, plan)
+        return plan
 
     async def _plan_task_with_function_calling(self, goal: str) -> dict:
         """
@@ -249,8 +339,14 @@ class OrchestratorService:
 
         tool = types.Tool(function_declarations=[create_plan_function])
 
-        # Get API key via rotation or fallback
-        orchestrator_model_name = self.llm.settings.agent_mode_api_model or "gemini-3.1-flash-lite"
+        # Resolve orchestrator model name from settings if aliases are used
+        orchestrator_model_name = self.llm.settings.agent_mode_orchestrator
+        if not orchestrator_model_name or orchestrator_model_name in ("LITE", "FLASH"):
+            if orchestrator_model_name == "FLASH":
+                orchestrator_model_name = getattr(self.llm.settings, "google_model_flash", "gemini-2.5-flash")
+            else:
+                orchestrator_model_name = getattr(self.llm.settings, "google_model_lite", "gemini-3.1-flash-lite-preview")
+        
         api_key = None
         if self.key_rotator and self.key_rotator.keys:
             api_key, wait = self.key_rotator.get_next_key()
@@ -263,12 +359,17 @@ class OrchestratorService:
         client = genai_sdk.Client(api_key=config_key)
 
         # Build prompt with worker capabilities
-        prompt = f"""Create an execution plan for this task: {goal}
+        # Build dynamic worker list for prompt
+        _search_block = ""
+        if "Search" in self.workers:
+            _search_block = "\n9. **Search** - Search the web for information via Google\n   Required inputs: {{\"query\": str, \"max_results\": int (optional), \"synthesize\": bool (optional)}}"
+
+        prompt = f"""You are a task orchestrator. Create an execution plan for this task: {goal}
 
 Available workers and their capabilities:
 
-1. **RAG** - Search persona lore and knowledge base
-   Required inputs: {{"query": str, "persona_name": str (optional), "top_k": int}}
+1. **RAG** - Search knowledge base and indexed documents
+   Required inputs: {{"query": str, "top_k": int}}
 
 2. **Code** - Analyze, generate, review, or execute code
    Required inputs: {{"task_type": "analyze|generate|execute|review", "code": str (for analyze/execute/review), "prompt": str (for generate), "language": str}}
@@ -276,8 +377,8 @@ Available workers and their capabilities:
 3. **Shell** - Execute shell commands and file operations
    Required inputs: {{"operation": "command|file_read|file_write|list_dir", "command": str (for command), "path": str (for file ops)}}
 
-4. **Memory** - Search user memories and profile
-   Required inputs: {{"query": str, "memory_type": "episodic|persona|profile|all", "persona_name": str (optional), "limit": int}}
+4. **Memory** - Search execution history and stored knowledge
+   Required inputs: {{"query": str, "memory_type": "episodic", "limit": int}}
 
 5. **Web** - Fetch and analyze web pages
    Required inputs: {{"url": str, "action": "fetch|summarize|extract_links|extract_data"}}
@@ -290,8 +391,13 @@ Available workers and their capabilities:
 
 8. **Router** - Classify tasks and recommend workers
    Required inputs: {{"task_description": str, "context": str (optional)}}
+{_search_block}
 
-{"9. **Search** - Search the web for information via Google\n   Required inputs: {{\"query\": str, \"max_results\": int (optional), \"synthesize\": bool (optional)}}" if "Search" in self.workers else ""}
+10. **Dynamic** - Create a specialized agent for any task not covered by other workers.
+   Required inputs: {{"system_prompt": str (detailed role, expertise, and instructions for the agent), "task": str (the specific task to execute), "output_format": "text|json|code"}}
+   Use freely when the task needs specialized reasoning, domain expertise, or a custom approach.
+   The system_prompt MUST define: the agent's role, domain expertise, and expected output format.
+   Example: {{"system_prompt": "You are a senior database architect...", "task": "Optimize this SQL query...", "output_format": "text"}}
 
 Guidelines:
 - Use multiple workers when task is complex
@@ -299,6 +405,7 @@ Guidelines:
 - Steps without depends_on run in parallel
 - Keep plans concise (1-5 steps)
 - Be specific with input parameters
+- Use Dynamic worker freely for specialized reasoning, analysis, writing, math, or any domain-specific task
 
 Call create_execution_plan with your plan."""
 
@@ -323,18 +430,19 @@ Call create_execution_plan with your plan."""
 
     async def _plan_task_prompt_based(self, goal: str, model: str) -> dict:
         """Legacy prompt-based planning (fallback)."""
-        prompt = f"""You are an AI task orchestrator. Given a user's goal, break it down into steps executed by specialized workers.
+        prompt = f"""You are a task orchestrator. Given a user's goal, break it down into steps executed by specialized workers.
 
 Available workers:
-- RAG: Search persona lore and knowledge base (inputs: query, persona_name, top_k)
+- RAG: Search knowledge base and indexed documents (inputs: query, top_k)
 - Code: Analyze, generate, review, or execute code (inputs: task_type=analyze|generate|execute|review, code, language, prompt)
 - Shell: Execute shell commands and file operations (inputs: operation=command|file_read|file_write|list_dir, command, path)
-- Memory: Search user memories and profile (inputs: query, memory_type=episodic|persona|profile|all, persona_name, limit)
+- Memory: Search execution history and stored knowledge (inputs: query, memory_type=episodic, limit)
 - Web: Fetch and analyze web pages (inputs: url, action=fetch|summarize|extract_links|extract_data)
 - Vision: Analyze images (inputs: task_type=describe|ocr|detect|qa, image_path, question)
 - Browser: Automate browser interactions (inputs: action=navigate|click|fill_form|extract|screenshot, url, selector)
 - Router: Classify tasks and recommend workers (inputs: task_description, context)
 {"- Search: Search the web for information (inputs: query, max_results, synthesize)" if "Search" in self.workers else ""}
+- Dynamic: Create a specialized agent for unique tasks (inputs: system_prompt, task, output_format=text|json|code). Use freely for reasoning, analysis, writing, math, or domain-specific tasks. system_prompt must define the agent's role and expertise.
 
 User goal: {goal}
 
@@ -344,14 +452,14 @@ Create a JSON execution plan with this structure:
   "steps": [
     {{
       "worker": "RAG",
-      "input": {{"query": "...", "persona_name": "...", "top_k": 5}},
+      "input": {{"query": "...", "top_k": 5}},
       "description": "What this step accomplishes",
       "depends_on": [0]  // Optional: array of step indices this depends on (0-indexed). Omit for parallel execution.
     }},
     {{
-      "worker": "Code",
-      "input": {{"task_type": "analyze", "code": "...", "language": "python"}},
-      "description": "Analyze the code",
+      "worker": "Dynamic",
+      "input": {{"system_prompt": "You are a specialist in...", "task": "Analyze...", "output_format": "text"}},
+      "description": "Specialized analysis",
       "depends_on": []  // Empty array = no dependencies, can run in parallel with step 0
     }}
   ]
@@ -376,7 +484,7 @@ Plan:"""
                     await asyncio.sleep(wait)
                     api_key, _ = self.key_rotator.get_next_key()
 
-            target_model = self.llm.settings.agent_mode_api_model or "gemini-3.1-flash-lite"
+            target_model = self.llm.settings.agent_mode_api_model or "gemini-3.1-flash-lite-preview"
             key = api_key or self.llm.settings.gemini_primary_key or self.llm.settings.gemini_fallback_key
             if not key:
                 raise Exception("No API key available for planning")
@@ -465,7 +573,7 @@ Final answer:"""
                     await asyncio.sleep(wait)
                     api_key, _ = self.key_rotator.get_next_key()
 
-            target_model = self.llm.settings.agent_mode_api_model or "gemini-3.1-flash-lite"
+            target_model = self.llm.settings.agent_mode_api_model or "gemini-3.1-flash-lite-preview"
             key = api_key or self.llm.settings.gemini_primary_key or self.llm.settings.gemini_fallback_key
             if not key:
                 logger.warning("[Orchestrator] No client for synthesis, returning raw results")
@@ -480,6 +588,134 @@ Final answer:"""
             logger.error(f"[Orchestrator] Synthesis failed: {e}")
             return f"Task completed with {len(worker_results)} steps:\n\n{combined_results}"
 
+    async def _deliberate_on_plan(self, goal: str, plan: dict) -> dict:
+        """
+        Multi-perspective deliberation on the execution plan before running.
+
+        Analyzes the plan from 3 perspectives (Intent, Gaps, Flow) to catch
+        issues like empty inputs, missing dependencies, or misunderstood intent.
+
+        Returns:
+            {"deliberation": str, "refined_understanding": str, "steps": [...]}
+            or empty dict on failure
+        """
+        plan_json = json.dumps(plan, indent=2, ensure_ascii=False)
+
+        prompt = f"""You are a council of three analysts reviewing an execution plan before it runs.
+
+USER'S REQUEST: {goal}
+
+CURRENT PLAN:
+{plan_json}
+
+Analyze from three perspectives:
+
+## INTENT ANALYST
+What does the user ACTUALLY want? What implicit requirements exist?
+For example: "create a hello world script" means create a FILE WITH WORKING CODE, not an empty file.
+"create X and Y" means create BOTH, not just one.
+
+## GAP DETECTOR
+Are any step inputs incomplete? Will any worker receive empty or insufficient data?
+Check: Does the Shell worker have actual content to write, or is it relying on dependency_results?
+If a step generates content (Dynamic/Code) that a later step needs, is the dependency declared?
+Are file paths specific and valid?
+
+## FLOW AUDITOR
+Will data flow correctly between steps? Are depends_on declarations correct?
+Will dependency_results provide the right data format for each downstream step?
+Are steps ordered logically?
+
+Then return ONLY valid JSON:
+{{
+  "deliberation": "Your complete multi-perspective analysis (2-3 paragraphs)",
+  "refined_understanding": "One sentence: what the user actually wants, including implicit requirements",
+  "steps": [<refined steps array - same structure as input, with enriched/corrected inputs>]
+}}
+
+CRITICAL RULES:
+- If a step needs content from a previous step, ensure depends_on is set correctly
+- Enrich vague inputs with specific details inferred from the user's intent
+- If Shell write_file has empty content but depends on a code-generating step, that's OK (dependency_results will provide it)
+- Do NOT add new steps unless absolutely necessary
+- Do NOT remove steps the user explicitly requested
+- Return ONLY the JSON, no markdown formatting"""
+
+        try:
+            api_key = None
+            if self.key_rotator and self.key_rotator.keys:
+                api_key, wait = self.key_rotator.get_next_key()
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                    api_key, _ = self.key_rotator.get_next_key()
+
+            target_model = self.llm.settings.agent_mode_api_model or "gemini-3.1-flash-lite-preview"
+            key = api_key or self.llm.settings.gemini_primary_key or self.llm.settings.gemini_fallback_key
+            if not key:
+                logger.warning("[Orchestrator] No API key for deliberation, skipping")
+                return {}
+
+            from ..core.llm_clients import GeminiClient
+            client = GeminiClient(api_key=key, model_name=target_model)
+            response_text = client.generate_content_rest(prompt) or ""
+
+            # Clean markdown fences
+            response_text = response_text.strip()
+            if response_text.startswith("```json"):
+                response_text = response_text[7:]
+            if response_text.startswith("```"):
+                response_text = response_text[3:]
+            if response_text.endswith("```"):
+                response_text = response_text[:-3]
+            response_text = response_text.strip()
+
+            result = json.loads(response_text)
+            logger.info(f"[Orchestrator] Deliberation complete: {result.get('refined_understanding', '')[:100]}")
+            return result
+
+        except Exception as e:
+            logger.warning(f"[Orchestrator] Deliberation failed (non-fatal): {e}")
+            return {}
+
+    async def _build_session_context(self, db: AsyncSession, session_id: int, current_execution_id: int) -> str:
+        """
+        Build context from previous executions in the same session.
+
+        Returns a formatted string with goal summaries and results from
+        the last 5 completed executions (excluding the current one).
+        """
+        try:
+            stmt = (
+                select(AgentExecution)
+                .where(
+                    AgentExecution.agent_session_id == session_id,
+                    AgentExecution.id != current_execution_id,
+                    AgentExecution.status == AgentExecutionStatus.COMPLETED,
+                )
+                .order_by(AgentExecution.created_at.desc())
+                .limit(5)
+            )
+            result = await db.execute(stmt)
+            past_executions = list(reversed(result.scalars().all()))
+
+            if not past_executions:
+                return ""
+
+            lines = []
+            for i, ex in enumerate(past_executions, 1):
+                goal_short = (ex.goal or "")[:80]
+                result_short = (ex.result or "")[:250]
+                lines.append(f"Task {i}: {goal_short}")
+                if result_short:
+                    lines.append(f"  Result: {result_short}")
+                lines.append("")
+
+            return "\n".join(lines).strip()
+
+        except Exception as e:
+            logger.warning(f"[Orchestrator] Failed to build session context: {e}")
+            return ""
+
     def _estimate_tokens(self, text: str) -> int:
         """Estimate token count (heuristic: 1 token ≈ 4 chars)."""
         return len(text) // 4 + 10
@@ -488,17 +724,25 @@ Final answer:"""
         self,
         db: AsyncSession,
         execution_id: int,
-        steps: list
+        steps: list,
+        goal: str = "",
+        event_log=None,
     ) -> list:
         """
-        Execute workers with support for parallel execution and dependencies.
+        Execute workers with support for parallel execution, dependencies, and replanning.
 
-        Phase 3 enhancement: Detect independent steps and run them in parallel.
+        Features:
+        - Topological sort for parallel execution by dependency level
+        - Dynamic replanning when steps fail mid-execution (max 1 replan)
+        - Context compaction for large dependency results
+        - Event logging for real-time WebSocket streaming
 
         Args:
             db: Database session
             execution_id: Execution ID
             steps: List of step definitions from plan
+            goal: Original user goal (used for replanning context)
+            event_log: EventLog for streaming events to WebSocket
 
         Returns:
             List of worker results (in step order)
@@ -515,6 +759,8 @@ Final answer:"""
 
         logger.info(f"[Orchestrator] Dependency graph: {len(execution_levels)} levels")
 
+        replan_count = 0
+
         for level_idx, level_steps in enumerate(execution_levels):
             logger.info(f"[Orchestrator] Executing level {level_idx + 1}: {len(level_steps)} parallel tasks")
 
@@ -522,7 +768,10 @@ Final answer:"""
             tasks = []
             for step_idx in level_steps:
                 step = steps[step_idx]
-                task = self._execute_single_worker(db, execution_id, step, step_idx, completed_steps)
+                task = self._execute_single_worker(
+                    db, execution_id, step, step_idx, completed_steps,
+                    event_log=event_log,
+                )
                 tasks.append(task)
 
             # Wait for all parallel tasks to complete
@@ -536,6 +785,238 @@ Final answer:"""
                 else:
                     results[step_idx] = result
                     completed_steps[step_idx] = result
+
+            # ── Dynamic Replanning: check if failed steps require plan revision ──
+            failed_in_level = [
+                idx for idx in level_steps
+                if isinstance(results[idx], dict) and "error" in results[idx]
+            ]
+            remaining_levels = execution_levels[level_idx + 1:]
+            remaining_indices = [idx for level in remaining_levels for idx in level]
+
+            if failed_in_level and remaining_indices and replan_count == 0:
+                replan_count += 1
+                logger.info(
+                    f"[Orchestrator] Replanning: {len(failed_in_level)} failed steps, "
+                    f"{len(remaining_indices)} remaining steps"
+                )
+
+                # Persist replan state to DB
+                try:
+                    stmt = select(AgentExecution).where(AgentExecution.id == execution_id)
+                    exec_result = await db.execute(stmt)
+                    execution_record = exec_result.scalar_one_or_none()
+                    if execution_record:
+                        execution_record.replan_count = replan_count
+                        execution_record.original_plan = execution_record.plan
+                        await db.commit()
+                except Exception as e:
+                    logger.warning(f"[Orchestrator] Failed to persist replan state: {e}")
+
+                if event_log:
+                    event_log.emit(EventType.REPLAN_TRIGGERED, {
+                        "failed_steps": failed_in_level,
+                        "remaining_steps": remaining_indices,
+                    })
+
+                new_plan = await self._replan_remaining_steps(
+                    goal=goal,
+                    steps=steps,
+                    completed_results=completed_steps,
+                    failed_indices=failed_in_level,
+                    remaining_indices=remaining_indices,
+                )
+
+                if new_plan and new_plan.get("steps"):
+                    logger.info(f"[Orchestrator] Replan generated {len(new_plan['steps'])} new steps")
+                    if event_log:
+                        event_log.emit(EventType.PLAN_REVISED, {
+                            "new_steps_count": len(new_plan["steps"]),
+                        })
+                    # Execute new steps sequentially (simpler than rebuilding dependency graph)
+                    for new_step in new_plan["steps"]:
+                        new_idx = len(results)
+                        new_result = await self._execute_single_worker(
+                            db, execution_id, new_step, new_idx, completed_steps,
+                            event_log=event_log,
+                        )
+                        results.append(new_result)
+                        if not (isinstance(new_result, dict) and "error" in new_result):
+                            completed_steps[new_idx] = new_result
+                    break  # Exit original level loop — replanned steps replace remaining
+
+        return results
+
+    async def _replan_remaining_steps(
+        self,
+        goal: str,
+        steps: list,
+        completed_results: dict,
+        failed_indices: list,
+        remaining_indices: list,
+    ) -> dict:
+        """
+        Generate a revised plan for remaining steps after failures.
+
+        Scoped replanning: only revises the remaining work, keeping completed
+        results as inputs. Max 1 replan per execution.
+        """
+        # Format completed results as summaries
+        completed_summary = []
+        for idx, result in sorted(completed_results.items()):
+            step_desc = steps[idx].get("description", f"Step {idx}") if idx < len(steps) else f"Step {idx}"
+            result_preview = json.dumps(result, ensure_ascii=False, default=str)[:200]
+            completed_summary.append(f"  Step {idx} ({step_desc}): COMPLETED — {result_preview}")
+
+        # Format failed steps
+        failed_summary = []
+        for idx in failed_indices:
+            step_desc = steps[idx].get("description", f"Step {idx}") if idx < len(steps) else f"Step {idx}"
+            error = json.dumps(steps[idx], ensure_ascii=False, default=str)[:150] if idx < len(steps) else "unknown"
+            failed_summary.append(f"  Step {idx} ({step_desc}): FAILED")
+
+        # Format remaining steps
+        remaining_summary = []
+        for idx in remaining_indices:
+            if idx < len(steps):
+                step = steps[idx]
+                remaining_summary.append(f"  Step {idx}: {step.get('worker', '?')} — {step.get('description', '?')}")
+
+        prompt = f"""A multi-step execution plan partially failed. Revise ONLY the remaining steps.
+
+## Original Goal
+{goal}
+
+## Completed Successfully
+{chr(10).join(completed_summary) if completed_summary else "  (none)"}
+
+## Failed Steps
+{chr(10).join(failed_summary) if failed_summary else "  (none)"}
+
+## Remaining Steps (from original plan — may need revision)
+{chr(10).join(remaining_summary) if remaining_summary else "  (none)"}
+
+## Available Workers
+{', '.join(self.workers.keys())}
+
+Create a revised plan for ONLY the remaining work. Consider:
+- What completed steps produced (use their results as context)
+- Why steps failed (avoid repeating the same approach)
+- Whether alternative workers could accomplish the failed steps' goals
+
+Return JSON: {{"reasoning": "why this revised plan", "steps": [...]}}
+Each step: {{"worker": str, "input": dict, "description": str}}
+"""
+
+        try:
+            # Use the same planning infrastructure
+            result = await self._plan_task_prompt_based(prompt, "LITE")
+            return result
+        except Exception as e:
+            logger.error(f"[Orchestrator] Replanning failed: {e}")
+            return {}
+
+    async def _execute_workers_supervised(
+        self,
+        db: AsyncSession,
+        execution_id: int,
+        steps: list
+    ) -> list:
+        """
+        Execute workers sequentially with per-step user approval.
+
+        For each step:
+        1. Creates a WorkerTask with status=awaiting_approval
+        2. Polls DB every 1s waiting for status change to approved/failed
+        3. On approved: executes the worker
+        4. On failed (skipped): records skip and continues
+        5. 5-minute timeout per step
+
+        Args:
+            db: Database session
+            execution_id: Execution ID
+            steps: List of step definitions from plan
+
+        Returns:
+            List of worker results (in step order)
+        """
+        results = []
+        completed_steps = {}
+
+        for step_idx, step in enumerate(steps):
+            worker_type = step.get("worker", "Unknown")
+            worker_input = step.get("input", {})
+            description = step.get("description", "")
+
+            logger.info(f"[Orchestrator] Supervised step {step_idx}: {worker_type} - awaiting approval")
+
+            # Create worker task record in awaiting_approval state
+            worker_task_record = AgentWorkerTask(
+                execution_id=execution_id,
+                worker_type=worker_type,
+                model="pending",
+                input_data={"description": description, "step_index": step_idx, **worker_input},
+                status="awaiting_approval",
+            )
+            db.add(worker_task_record)
+            await db.commit()
+            await db.refresh(worker_task_record)
+
+            task_id = worker_task_record.id
+
+            # Poll DB for approval (timeout 5 minutes)
+            approved = False
+            skipped = False
+            timeout_seconds = 300
+            poll_interval = 1.0
+            elapsed = 0.0
+
+            while elapsed < timeout_seconds:
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
+
+                # Re-fetch task status from DB
+                stmt = select(AgentWorkerTask).where(AgentWorkerTask.id == task_id)
+                result = await db.execute(stmt)
+                task_record = result.scalar_one_or_none()
+
+                if not task_record:
+                    logger.error(f"[Orchestrator] Worker task {task_id} disappeared")
+                    skipped = True
+                    break
+
+                if task_record.status == "approved":
+                    approved = True
+                    break
+                elif task_record.status == "failed":
+                    skipped = True
+                    break
+
+            if not approved and not skipped:
+                # Timeout
+                logger.warning(f"[Orchestrator] Worker task {task_id} timed out after {timeout_seconds}s")
+                worker_task_record.status = "failed"
+                worker_task_record.error = "Timeout: sem resposta do usuário em 5 minutos"
+                await db.commit()
+                results.append({"error": "Timeout", "skipped": True})
+                continue
+
+            if skipped:
+                logger.info(f"[Orchestrator] Worker task {task_id} skipped by user")
+                results.append({"skipped": True, "worker": worker_type})
+                continue
+
+            # Approved — execute the worker
+            logger.info(f"[Orchestrator] Worker task {task_id} approved, executing {worker_type}")
+            try:
+                result = await self._execute_single_worker(
+                    db, execution_id, step, step_idx, completed_steps
+                )
+                results.append(result)
+                completed_steps[step_idx] = result
+            except Exception as e:
+                logger.error(f"[Orchestrator] Supervised step {step_idx} failed: {e}")
+                results.append({"error": str(e)})
 
         return results
 
@@ -589,15 +1070,35 @@ Final answer:"""
 
         return levels
 
+    # ── Per-worker timeouts (seconds) ──
+    # ReAct-enabled workers get more time for iterative loops
+    WORKER_TIMEOUTS = {
+        "Code": 120.0,     # ReAct: generate → execute → fix cycles
+        "Shell": 90.0,     # ReAct: read → write → verify cycles
+        "Browser": 180.0,  # ReAct: navigate → click → screenshot cycles
+        "Web": 60.0,       # ReAct: fetch → summarize (fewer iterations)
+        "Search": 60.0,    # ReAct: search → refine (fewer iterations)
+        "RAG": 30.0,       # One-shot: retrieval + synthesis
+        "Memory": 30.0,    # One-shot: search + synthesis
+        "Router": 30.0,    # One-shot: classification
+        "Vision": 60.0,    # One-shot: image processing
+        "Dynamic": 90.0,   # One-shot: freeform tasks
+    }
+
+    def _get_worker_timeout(self, worker_type: str) -> float:
+        """Get timeout for a worker type, with default fallback."""
+        return self.WORKER_TIMEOUTS.get(worker_type, 60.0)
+
     async def _execute_single_worker(
         self,
         db: AsyncSession,
         execution_id: int,
         step: dict,
         step_idx: int,
-        completed_steps: dict
+        completed_steps: dict,
+        event_log=None,
     ) -> dict:
-        """Execute a single worker with TPM+RPM management and concurrency cap."""
+        """Execute a single worker with TPM+RPM management, context compaction, and event logging."""
         async with self._semaphore:  # Cap parallel workers
             worker_type = step.get("worker")
             worker_input = step.get("input", {})
@@ -608,20 +1109,39 @@ Final answer:"""
 
             logger.info(f"[Orchestrator] Executing step {step_idx}: {worker_type}")
 
+            if event_log:
+                event_log.emit(EventType.WORKER_STARTED, {
+                    "description": step.get("description", ""),
+                }, worker_type=worker_type, step_index=step_idx)
+
             # Inject results from dependencies if needed
             depends_on = step.get("depends_on", [])
             if depends_on:
-                worker_input["dependency_results"] = {
+                raw_deps = {
                     dep_idx: completed_steps.get(dep_idx)
                     for dep_idx in depends_on
                     if dep_idx in completed_steps
                 }
+                # Context engineering: compact large dependency results
+                # to prevent context rot in downstream workers
+                try:
+                    llm_caller = self._make_compact_llm_caller()
+                    worker_input["dependency_results"] = await self._context_manager.compact_dependency_results(
+                        raw_deps, step.get("description", ""), llm_caller
+                    )
+                except Exception as e:
+                    logger.warning(f"[Orchestrator] Dependency compaction failed, using raw: {e}")
+                    worker_input["dependency_results"] = raw_deps
 
             # Dual rate limit check (TPM + RPM) before calling worker
             estimated_tokens = self._estimate_tokens(json.dumps(worker_input))
             wait_seconds = self.tpm.request_permission(estimated_tokens)
             if wait_seconds > 0:
                 logger.warning(f"[Orchestrator] Rate limit hit, waiting {wait_seconds:.1f}s (step {step_idx})")
+                if event_log:
+                    event_log.emit(EventType.RATE_LIMIT_WAIT, {
+                        "wait_seconds": wait_seconds,
+                    }, worker_type=worker_type, step_index=step_idx)
                 await asyncio.sleep(wait_seconds)
                 # Re-check after waiting (another worker may have consumed quota)
                 wait_seconds = self.tpm.request_permission(estimated_tokens)
@@ -644,15 +1164,81 @@ Final answer:"""
                 "enable_thinking": self._enable_thinking,
             }
 
-            # Execute worker
+            # Execute worker with per-type timeout via self-correction-aware dispatch
+            # Timeout scales with max self-corrections to allow retry attempts
             worker = self.workers[worker_type]
-            worker_task = await worker.execute(db, execution_id, worker_input)
+            base_timeout = self._get_worker_timeout(worker_type)
+            correction_factor = 1 + getattr(worker, 'MAX_SELF_CORRECTIONS', 0)
+            timeout = base_timeout * correction_factor if getattr(worker, 'ENABLE_EVALUATION', False) else base_timeout
+            try:
+                worker_task = await asyncio.wait_for(
+                    worker.execute_with_correction(db, execution_id, worker_input),
+                    timeout=timeout
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"[Orchestrator] Worker {worker_type} timed out after {timeout}s (step {step_idx})")
+                if event_log:
+                    event_log.emit(EventType.WORKER_FAILED, {
+                        "error": f"Timed out after {int(timeout)}s",
+                    }, worker_type=worker_type, step_index=step_idx)
+                return {"error": f"Worker {worker_type} timed out after {int(timeout)} seconds"}
 
             if worker_task.status == AgentTaskStatus.COMPLETED:
-                return worker_task.output_data
+                result_data = worker_task.output_data or {}
+                # Update TPM with actual tokens (replace estimated entry)
+                actual_tokens = result_data.pop("_tokens_used", 0)
+                if actual_tokens > 0 and estimated_tokens > 0:
+                    self.tpm.update_actual_tokens(estimated_tokens, actual_tokens)
+
+                if event_log:
+                    event_log.emit(EventType.WORKER_COMPLETED, {
+                        "tokens_used": actual_tokens,
+                        "output_keys": list(result_data.keys())[:5],
+                    }, worker_type=worker_type, step_index=step_idx)
+
+                # Context engineering: compact output for downstream consumption
+                try:
+                    llm_caller = self._make_compact_llm_caller()
+                    result_data = await self._context_manager.compact_output_for_downstream(
+                        result_data, llm_caller
+                    )
+                except Exception as e:
+                    logger.warning(f"[Orchestrator] Output compaction failed, using raw: {e}")
+
+                return result_data
             else:
                 logger.error(f"[Orchestrator] Worker {worker_type} failed: {worker_task.error}")
+                if event_log:
+                    event_log.emit(EventType.WORKER_FAILED, {
+                        "error": (worker_task.error or "")[:200],
+                    }, worker_type=worker_type, step_index=step_idx)
                 return {"error": worker_task.error}
+
+    def _make_compact_llm_caller(self):
+        """
+        Create a lightweight async LLM caller for context compaction.
+
+        Uses the cheapest model (flash-lite) for summarization tasks.
+        Returns an async callable(prompt: str) -> str.
+        """
+        async def _caller(prompt: str) -> str:
+            api_key = None
+            if self.key_rotator and self.key_rotator.keys:
+                api_key, wait = self.key_rotator.get_next_key()
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                    api_key, _ = self.key_rotator.get_next_key()
+
+            target_model = self.llm.settings.agent_mode_api_model or "gemini-3.1-flash-lite-preview"
+            key = api_key or self.llm.settings.gemini_primary_key or self.llm.settings.gemini_fallback_key
+            if not key:
+                raise Exception("No API key for compaction")
+
+            from ..core.llm_clients import GeminiClient
+            client = GeminiClient(api_key=key, model_name=target_model)
+            return client.generate_content_rest(prompt) or ""
+
+        return _caller
 
     async def get_execution_status(
         self,

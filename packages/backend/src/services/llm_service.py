@@ -38,7 +38,7 @@ class LLMService:
 
     LEGACY_MODELS = {
         "FLASH": "gemini-2.5-flash",
-        "LITE": "gemini-3.1-flash-lite",
+        "LITE": "gemini-3.1-flash-lite-preview",
         "DEEPSEEK": "deepseek/deepseek-r1:free",
         "LOCAL": "gpt-oss:20b",
     }
@@ -52,9 +52,9 @@ class LLMService:
         self._active_model_id = self.LEGACY_MODELS["FLASH"]
         self.memory_notifications: list[str] = []
 
-        # Clientes
-        self._gemini_flash = None
-        self._gemini_lite = None
+        # Clientes (1 key = 1 model)
+        self._gemini_flash: Optional[GeminiClient] = None
+        self._gemini_lite: Optional[GeminiClient] = None
         self._openrouter = None
         self._ollama = None
         self._vision_rotator = VisionKeyRotator()
@@ -62,23 +62,32 @@ class LLMService:
         self._init_clients()
 
     def _init_clients(self):
-        """Inicializa clientes LLM via API keys."""
+        """Inicializa clientes LLM via API keys (1 key = 1 model)."""
         s = self.settings
 
-        # Flash (qualidade) — usa primary key
-        primary = s.gemini_primary_key
-        if primary:
-            self._gemini_flash = GeminiClient(primary, self.LEGACY_MODELS["FLASH"])
+        # FLASH — usa primary key (first available key)
+        paid_key = s.gemini_primary_key
+        if paid_key:
+            model_flash = getattr(s, "google_model_flash", "gemini-2.5-flash")
+            logger.info(f"Initializing Gemini Flash with model: {model_flash} (Key starting with: {paid_key[:8]}...)")
+            self._gemini_flash = GeminiClient(paid_key, model_flash)
+        else:
+            logger.warning("No Gemini Primary Key found in settings.")
 
         # Lite (rápido/barato) — usa fallback key, ou primary se fallback não existir
-        lite_key = s.gemini_fallback_key or primary
+        lite_key = s.gemini_fallback_key or paid_key
         if lite_key:
-            self._gemini_lite = GeminiClient(lite_key, self.LEGACY_MODELS["LITE"])
+            model_lite = getattr(s, "google_model_lite", "gemini-3.1-flash-lite-preview")
+            logger.info(f"Initializing Gemini Lite with model: {model_lite} (Key starting with: {lite_key[:8]}...)")
+            self._gemini_lite = GeminiClient(lite_key, model_lite)
 
         if s.openrouter_api_key:
+            logger.info(f"Initializing OpenRouter with model: {s.openrouter_model_name}")
             self._openrouter = OpenRouterClient(s.openrouter_api_key, s.openrouter_model_name)
 
-        self._ollama = OllamaClient(self.LEGACY_MODELS["LOCAL"])
+        model_local = getattr(s, "ollama_chat_model", "gpt-oss:20b")
+        logger.info(f"Initializing Ollama Client with model: {model_local}")
+        self._ollama = OllamaClient(model_local)
 
     def set_mode(self, mode: str):
         """Troca o modo/modelo ativo.
@@ -86,20 +95,28 @@ class LLMService:
         Aceita:
         - Modos atuais: "FLASH", "LITE", "DEEPSEEK", "LOCAL"
         - Backward compat: "PRO" → "FLASH", "GOOGLE" → "FLASH"
-        - Model IDs diretos: "gemini-2.5-flash", "gemini-3.1-flash-lite", etc.
+        - Model IDs diretos: "gemini-2.5-flash", "gemini-3.1-flash-lite-preview", etc.
         """
         # Backward compatibility
-        if mode in ("PRO", "GOOGLE"):
+        if mode in ("GOOGLE", "PRO"):
             mode = "FLASH"
 
         # Modos conhecidos
         if mode in self.LEGACY_MODELS:
             self.mode = mode
-            self._active_model_id = self.LEGACY_MODELS[mode]
+            if mode == "FLASH":
+                self._active_model_id = getattr(self.settings, "google_model_flash", "gemini-2.5-flash")
+            elif mode == "LITE":
+                self._active_model_id = getattr(self.settings, "google_model_lite", "gemini-3.1-flash-lite-preview")
+            elif mode == "LOCAL":
+                self._active_model_id = getattr(self.settings, "ollama_chat_model", "gpt-oss:20b")
+            else:
+                self._active_model_id = self.LEGACY_MODELS[mode]
+                
             logger.info(f"Mode switched to {mode} ({self._active_model_id})")
             return
 
-        # Model ID direto (ex: "gemini-2.5-flash", "gemini-3.1-flash-lite")
+        # Model ID direto (ex: "gemini-2.5-flash", "gemini-3.1-flash-lite-preview")
         if mode.startswith("gemini-") or mode.startswith("gemma-"):
             self.mode = "FLASH"
             self._active_model_id = mode
@@ -113,7 +130,7 @@ class LLMService:
         # Desconhecido — default para FLASH
         logger.warning(f"Unknown mode '{mode}', defaulting to FLASH")
         self.mode = "FLASH"
-        self._active_model_id = self.LEGACY_MODELS["FLASH"]
+        self._active_model_id = getattr(self.settings, "google_model_flash", "gemini-2.5-flash")
 
     def get_client_for_mode(self) -> Optional[GeminiClient | OpenRouterClient | OllamaClient]:
         """Retorna o cliente correto para o modo atual."""
@@ -144,6 +161,7 @@ class LLMService:
         uploaded_files: Optional[list] = None,
         reasoning_level: str = "medium",
         enable_thinking: bool = False,
+        stop_event: Optional[threading.Event] = None,
     ) -> Generator[str, None, None]:
         """
         Gera resposta em streaming. Yield chunks de texto.
@@ -180,33 +198,35 @@ class LLMService:
             vision_key = self._vision_rotator.get_next_key(self.settings.vision_keys)
             if vision_key:
                 logger.info(f"[Vision Intercept] {self.mode} mode has multimodal content, routing to Gemini Flash")
-                temp_client = GeminiClient(vision_key, self.LEGACY_MODELS["FLASH"])
+                flash_model = getattr(self.settings, "google_model_flash", self.LEGACY_MODELS["FLASH"])
+                temp_client = GeminiClient(vision_key, flash_model)
                 yield from self._generate_gemini_multimodal_with_client(
                     temp_client, message, system_prompt, history, rag_context,
-                    images, video, pdfs, uploaded_files, reasoning_level
+                    images, video, pdfs, uploaded_files, reasoning_level, stop_event
                 )
                 return
             else:
                 logger.warning("[Vision Intercept] No vision keys configured, stripping images from request")
 
         if self.mode == "LOCAL":
-            yield from self._generate_local(message, system_prompt, history, rag_context, enable_thinking)
+            yield from self._generate_local(message, system_prompt, history, rag_context, enable_thinking, stop_event)
             return
 
         if self.mode == "DEEPSEEK" and self._openrouter:
-            yield from self._generate_openrouter(message, system_prompt, history, rag_context)
+            yield from self._generate_openrouter(message, system_prompt, history, rag_context, stop_event)
             return
 
         # Gemini (FLASH ou LITE)
         if has_multimodal:
             yield from self._generate_gemini_multimodal(
-                message, system_prompt, history, rag_context, images, video, pdfs, uploaded_files, reasoning_level
+                message, system_prompt, history, rag_context, images, video, pdfs, uploaded_files, reasoning_level, stop_event
             )
         else:
-            yield from self._generate_gemini(message, system_prompt, history, rag_context, reasoning_level)
+            yield from self._generate_gemini(message, system_prompt, history, rag_context, reasoning_level, stop_event)
 
     def _generate_gemini(
-        self, message: str, system_prompt: str, history: list[dict], rag_context: str, reasoning_level: str = "medium"
+        self, message: str, system_prompt: str, history: list[dict], rag_context: str, reasoning_level: str = "medium",
+        stop_event: Optional[threading.Event] = None
     ) -> Generator[str, None, None]:
         """Gera com Gemini (FLASH ou LITE) via google-genai SDK com thinking support."""
         client = self.get_client_for_mode()
@@ -228,11 +248,10 @@ class LLMService:
             )
 
             for chunk in response:
-                try:
-                    if chunk.text:
-                        yield chunk.text
-                except (ValueError, AttributeError):
-                    pass
+                if stop_event and stop_event.is_set():
+                    break
+                # response agora emite strings (pode ser o texto ou erro formatado)
+                yield chunk
 
         except Exception as e:
             yield f"[Gemini Error] {e}"
@@ -248,6 +267,7 @@ class LLMService:
         pdfs: Optional[list[dict]] = None,
         uploaded_files: Optional[list] = None,
         reasoning_level: str = "medium",
+        stop_event: Optional[threading.Event] = None,
     ) -> Generator[str, None, None]:
         """Gera com Gemini usando vision model para multimodal."""
         # Prioridade para multimodal: flash > lite
@@ -260,7 +280,7 @@ class LLMService:
 
         yield from self._generate_gemini_multimodal_with_client(
             client, message, system_prompt, history, rag_context,
-            images, video, pdfs, uploaded_files, reasoning_level
+            images, video, pdfs, uploaded_files, reasoning_level, stop_event
         )
 
     def _generate_gemini_multimodal_with_client(
@@ -275,6 +295,7 @@ class LLMService:
         pdfs: Optional[list[dict]] = None,
         uploaded_files: Optional[list] = None,
         reasoning_level: str = "medium",
+        stop_event: Optional[threading.Event] = None,
     ) -> Generator[str, None, None]:
         """Gera com Gemini multimodal via google-genai SDK. Thread-safe."""
         try:
@@ -317,18 +338,19 @@ class LLMService:
             )
 
             for chunk in response:
-                try:
-                    if chunk.text:
-                        yield chunk.text
-                except (ValueError, AttributeError):
-                    pass
+                if stop_event and stop_event.is_set():
+                    logger.info("[Gemini Multimodal] Stream cancelled via stop_event")
+                    break
+                # response agora emite strings diretamente
+                yield chunk
 
         except Exception as e:
             logger.error(f"Gemini multimodal error: {e}")
             yield f"[Gemini Vision Error] {e}"
 
     def _generate_openrouter(
-        self, message: str, system_prompt: str, history: list[dict], rag_context: str
+        self, message: str, system_prompt: str, history: list[dict], rag_context: str,
+        stop_event: Optional[threading.Event] = None
     ) -> Generator[str, None, None]:
         """Gera com OpenRouter (DeepSeek)."""
         if not self._openrouter:
@@ -344,6 +366,9 @@ class LLMService:
 
             stream = self._openrouter.stream_chat(msgs)
             for chunk in stream:
+                if stop_event and stop_event.is_set():
+                    logger.info("[OpenRouter] Stream cancelled via stop_event")
+                    break
                 if chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content
 
@@ -351,7 +376,8 @@ class LLMService:
             yield f"[DeepSeek Error] {e}"
 
     def _generate_local(
-        self, message: str, system_prompt: str, history: list[dict], rag_context: str, enable_thinking: bool = False
+        self, message: str, system_prompt: str, history: list[dict], rag_context: str, enable_thinking: bool = False,
+        stop_event: Optional[threading.Event] = None
     ) -> Generator[str, None, None]:
         """Gera com Ollama (modelo local)."""
         if not self._ollama:
@@ -365,7 +391,11 @@ class LLMService:
                 msgs.append({"role": role, "content": str(m.get("content", ""))})
             msgs.append({"role": "user", "content": message})
 
-            yield from self._ollama.stream_chat(msgs, think=enable_thinking)
+            for chunk in self._ollama.stream_chat(msgs, think=enable_thinking):
+                if stop_event and stop_event.is_set():
+                    logger.info("[Ollama] Stream cancelled via stop_event")
+                    break
+                yield chunk
 
         except Exception as e:
             yield f"[Local Error] {e}"

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { usePersonaStore } from '@/stores/persona-store';
 import { useChatStore } from '@/stores/chat-store';
 import { useAgentStore } from '@/stores/agent-store';
@@ -6,7 +6,7 @@ import { useAgentModeStore } from '@/stores/agent-mode-store';
 import { useAuthStore } from '@/stores/auth-store';
 import { useThemeStore } from '@/stores/theme-store';
 import { useT } from '@/stores/i18n-store';
-import { getPersonaTheme } from '@ahri/shared';
+import { usePersonaTheme } from '@/hooks/usePersonaTheme';
 import { PersonaDrawer } from '@/features/personas/PersonaDrawer';
 import { TPMQuotaMeter } from '@/components/TPMQuotaMeter';
 import type { AppMode } from '@/App';
@@ -24,7 +24,9 @@ export function Sidebar({ mode, setMode, previousMode = 'chat' }: SidebarProps) 
   const isSyncingSpotify = usePersonaStore((s) => s.isSyncingSpotify);
   const sessions = useChatStore((s) => s.sessions);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const isPendingNewChat = useChatStore((s) => s.isPendingNewChat);
   const loadSession = useChatStore((s) => s.loadSession);
+  const startNewChat = useChatStore((s) => s.startNewChat);
   const createSession = useChatStore((s) => s.createSession);
   const deleteSession = useChatStore((s) => s.deleteSession);
   const renameSession = useChatStore((s) => s.renameSession);
@@ -51,8 +53,25 @@ export function Sidebar({ mode, setMode, previousMode = 'chat' }: SidebarProps) 
   const clearHistory = useAgentModeStore((s) => s.clearHistory);
   const tpmStatus = useAgentModeStore((s) => s.tpmStatus);
 
+  // Agent sessions
+  const agentSessions = useAgentModeStore((s) => s.sessions);
+  const activeSession = useAgentModeStore((s) => s.activeSession);
+  const loadSessions = useAgentModeStore((s) => s.loadSessions);
+  const setActiveSession = useAgentModeStore((s) => s.setActiveSession);
+  const deleteAgentSession = useAgentModeStore((s) => s.deleteSession);
+
+  const [expandedSessionId, setExpandedSessionId] = useState<number | null>(null);
+
+  // Load agent sessions on mount
+  useEffect(() => { loadSessions(); }, []);
+
+  // Count running workers for badge
+  const runningWorkers = activeExecution?.worker_tasks?.filter(
+    (t) => t.status === 'running'
+  ).length ?? 0;
+
   const pendingTasks = agentTasks.filter((t) => t.status === 'pending').length;
-  const theme = getPersonaTheme(activePersona);
+  const theme = usePersonaTheme();
   const t = useT();
 
   // Token estimate: count chars / 4 (rough GPT-style estimate)
@@ -135,7 +154,7 @@ export function Sidebar({ mode, setMode, previousMode = 'chat' }: SidebarProps) 
           {/* New Chat Button */}
           <div className="p-2">
             <button
-              onClick={() => createSession()}
+              onClick={startNewChat}
               className="chat-new-session-btn"
               style={{ '--btn-color': theme.primary } as React.CSSProperties}
             >
@@ -149,6 +168,23 @@ export function Sidebar({ mode, setMode, previousMode = 'chat' }: SidebarProps) 
 
           {/* Session List */}
           <div className="px-2 pb-2 space-y-0.5">
+            {/* Pending new chat indicator — shown while user hasn't sent first message yet */}
+            {isPendingNewChat && (
+              <div
+                className="chat-session-item active"
+                style={{ '--session-color': theme.primary, '--session-shadow': theme.shadow } as React.CSSProperties}
+              >
+                <div className="flex items-center gap-1.5">
+                  <div
+                    className="w-1.5 h-1.5 rounded-full animate-pulse flex-shrink-0"
+                    style={{ background: theme.primary }}
+                  />
+                  <p className="text-xs truncate font-medium italic" style={{ color: 'var(--text-secondary)' }}>
+                    Novo chat...
+                  </p>
+                </div>
+              </div>
+            )}
             {sessions.slice(0, 15).map((s, index) => (
               <div
                 key={s.id}
@@ -374,10 +410,10 @@ export function Sidebar({ mode, setMode, previousMode = 'chat' }: SidebarProps) 
                 <rect x="3" y="3" width="18" height="18" rx="2" />
                 <path d="M9 11h6M9 15h6" />
               </svg>
-              {pendingTasks > 0 && (
+              {runningWorkers > 0 && (
                 <span
-                  className="absolute -top-1 -right-1 w-2 h-2 rounded-full shadow-sm"
-                  style={{ background: 'var(--error)' }}
+                  className="absolute -top-1 -right-1 w-2 h-2 rounded-full shadow-sm animate-pulse"
+                  style={{ background: '#3b82f6' }}
                 />
               )}
             </div>
@@ -398,52 +434,116 @@ export function Sidebar({ mode, setMode, previousMode = 'chat' }: SidebarProps) 
 
       {/* Execution History */}
       <div className="flex-1 overflow-y-auto">
-        {/* New Task Button */}
+        {/* New Session Button */}
         <div className="p-2">
           <button
-            onClick={() => setActiveExecution(null)}
+            onClick={() => { setActiveSession(null); setActiveExecution(null); }}
             className="chat-new-session-btn"
             style={{ '--btn-color': theme.primary } as React.CSSProperties}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
-            <span>Nova Tarefa</span>
+            <span>Nova Seção</span>
           </button>
         </div>
 
-        {/* Execution List */}
-        <div className="px-2 pb-2 space-y-0.5">
-          {executions.length === 0 && (
+        {/* Session-grouped Execution List */}
+        <div className="px-2 pb-2 space-y-1">
+          {agentSessions.length === 0 && executions.length === 0 && (
             <p className="text-[10px] text-center py-4" style={{ color: 'var(--text-tertiary)' }}>
               Nenhuma execução ainda
             </p>
           )}
-          {executions.slice(0, 20).map((exec, index) => (
+
+          {/* Sessions with their executions */}
+          {agentSessions.map((session, sIdx) => {
+            const isExpanded = expandedSessionId === session.id || activeSession?.id === session.id;
+            const sessionExecs = session.executions || [];
+            const latestStatus = sessionExecs[0]?.status || 'completed';
+            return (
+              <div key={session.id} style={{ animation: 'fadeInUp 0.4s ease-out forwards', animationDelay: `${sIdx * 0.04}s`, opacity: 0 } as React.CSSProperties}>
+                {/* Session header */}
+                <div
+                  className={`group flex items-center gap-1.5 px-2 py-1.5 rounded-lg cursor-pointer transition-all duration-200 ${activeSession?.id === session.id ? 'agent-execution-item active' : 'agent-execution-item'}`}
+                  style={activeSession?.id === session.id ? { borderLeft: `2px solid ${theme.primary}` } : {}}
+                  onClick={() => {
+                    setActiveSession(session);
+                    setExpandedSessionId(isExpanded ? null : session.id);
+                    if (sessionExecs.length > 0) setActiveExecution(sessionExecs[0]);
+                  }}
+                >
+                  {/* Expand/collapse arrow */}
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="flex-shrink-0 transition-transform duration-200" style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', color: 'var(--text-tertiary)' }}>
+                    <path d="M9 18l6-6-6-6" />
+                  </svg>
+                  <div
+                    className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${latestStatus === 'running' ? 'animate-pulse' : ''}`}
+                    style={{ background: getStatusColor(latestStatus) }}
+                  />
+                  <p className="text-[11px] truncate font-medium flex-1" style={{ color: 'var(--text-primary)' }}>
+                    {session.title || `Seção #${session.id}`}
+                  </p>
+                  <span className="text-[9px] flex-shrink-0" style={{ color: 'var(--text-tertiary)' }}>
+                    {sessionExecs.length}x
+                  </span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); deleteAgentSession(session.id); }}
+                    className="p-0.5 chat-session-action opacity-0 group-hover:opacity-100 transition-all duration-300 flex-shrink-0"
+                    style={{ color: 'var(--text-tertiary)' }}
+                    title={t('common.delete')}
+                  >
+                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                </div>
+
+                {/* Expanded: show executions inside session */}
+                {isExpanded && sessionExecs.length > 0 && (
+                  <div className="ml-3 pl-2 space-y-0.5 mt-0.5" style={{ borderLeft: '1px solid var(--glass-border)' }}>
+                    {sessionExecs.map((exec) => (
+                      <div
+                        key={exec.id}
+                        className={`group agent-execution-item ${exec.id === activeExecution?.id ? 'active' : ''}`}
+                        onClick={() => { setActiveSession(session); setActiveExecution(exec); }}
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                            <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${exec.status === 'running' ? 'animate-pulse' : ''}`} style={{ background: getStatusColor(exec.status) }} />
+                            <p className="text-[10px] truncate" style={{ color: 'var(--text-secondary)' }}>
+                              {exec.goal}
+                            </p>
+                          </div>
+                          <span className="text-[9px] flex-shrink-0" style={{ color: 'var(--text-tertiary)' }}>
+                            {exec.created_at ? timeAgo(exec.created_at) : ''}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Ungrouped executions (no session) */}
+          {executions.filter(e => !e.agent_session_id).map((exec, index) => (
             <div
               key={exec.id}
               className={`group agent-execution-item ${exec.id === activeExecution?.id ? 'active' : ''}`}
-              style={{
-                animation: 'fadeInUp 0.4s ease-out forwards',
-                animationDelay: `${index * 0.04}s`,
-                opacity: 0,
-              } as React.CSSProperties}
-              onClick={() => setActiveExecution(exec)}
+              style={{ animation: 'fadeInUp 0.4s ease-out forwards', animationDelay: `${(agentSessions.length + index) * 0.04}s`, opacity: 0 } as React.CSSProperties}
+              onClick={() => { setActiveSession(null); setActiveExecution(exec); }}
             >
               <div className="flex items-center justify-between gap-1">
                 <div className="flex items-center gap-2 flex-1 min-w-0">
-                  <div
-                    className={`w-2 h-2 rounded-full flex-shrink-0 ${exec.status === 'running' ? 'animate-pulse' : ''}`}
-                    style={{ background: getStatusColor(exec.status) }}
-                  />
-                  <p className="text-xs truncate font-medium" style={{ color: 'var(--text-primary)' }}>
-                    {exec.goal}
-                  </p>
+                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${exec.status === 'running' ? 'animate-pulse' : ''}`} style={{ background: getStatusColor(exec.status) }} />
+                  <p className="text-xs truncate font-medium" style={{ color: 'var(--text-primary)' }}>{exec.goal}</p>
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
-                  <span className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
-                    {exec.created_at ? timeAgo(exec.created_at) : ''}
-                  </span>
+                  <span className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>{exec.created_at ? timeAgo(exec.created_at) : ''}</span>
                   <button
                     onClick={(e) => { e.stopPropagation(); deleteExecution(exec.id); }}
                     className="p-0.5 chat-session-action opacity-0 group-hover:opacity-100 transition-all duration-300"
@@ -457,20 +557,8 @@ export function Sidebar({ mode, setMode, previousMode = 'chat' }: SidebarProps) 
                   </button>
                 </div>
               </div>
-              {exec.worker_tasks && exec.worker_tasks.length > 0 && (
-                <div className="flex items-center gap-1 mt-1 ml-4">
-                  <span className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
-                    {exec.worker_tasks.length} workers
-                  </span>
-                </div>
-              )}
             </div>
           ))}
-          {executions.length > 20 && (
-            <p className="text-[10px] text-center py-1" style={{ color: 'var(--text-tertiary)' }}>
-              +{executions.length - 20} mais
-            </p>
-          )}
         </div>
       </div>
 

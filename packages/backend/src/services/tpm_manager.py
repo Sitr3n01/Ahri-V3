@@ -10,6 +10,7 @@ Both limits are checked atomically under a single lock.
 import time
 import hashlib
 import threading
+import uuid
 from collections import deque
 from datetime import datetime, timedelta
 from typing import Optional
@@ -45,7 +46,8 @@ class TPMManager:
         self.window_seconds = window_seconds
 
         # In-memory logs for fast rate limiting
-        self.token_log: deque[tuple[float, int]] = deque()  # (timestamp, token_count)
+        # token_log entries: (timestamp, token_count, request_id)
+        self.token_log: deque[tuple[float, int, str]] = deque()
         self.request_log: deque[float] = deque()             # timestamps of requests
 
         # Single lock guards both logs atomically
@@ -54,6 +56,10 @@ class TPMManager:
     def _hash_api_key(self, api_key: str) -> str:
         """Hash API key for privacy (SHA256)."""
         return hashlib.sha256(api_key.encode()).hexdigest()
+
+    def _generate_request_id(self) -> str:
+        """Generate a unique request ID for token tracking."""
+        return uuid.uuid4().hex[:12]
 
     def _prune_logs(self, now: float) -> None:
         """Remove entries older than the sliding window. Must hold _lock."""
@@ -71,9 +77,12 @@ class TPMManager:
         Returns:
             wait_seconds: 0 if request can proceed, >0 to wait
         """
-        return self.request_permission(estimated_tokens)
+        result = self.request_permission(estimated_tokens)
+        if isinstance(result, tuple):
+            return result[0]  # Return just the wait time for backward compat
+        return result
 
-    def request_permission(self, estimated_tokens: int) -> float:
+    def request_permission(self, estimated_tokens: int) -> float | tuple[float, str]:
         """
         Atomically check BOTH RPM and TPM limits.
 
@@ -84,8 +93,9 @@ class TPMManager:
             estimated_tokens: Estimated tokens for this request
 
         Returns:
-            wait_seconds: 0 if both limits allow the request,
-                          >0 is the max wait of both checks
+            If wait needed: wait_seconds (float > 0)
+            If allowed: tuple(0.0, request_id) where request_id can be used
+                        in update_actual_tokens() for precise matching
         """
         with self._lock:
             now = time.time()
@@ -95,7 +105,7 @@ class TPMManager:
             wait_rpm = 0.0
 
             # --- Check TPM ---
-            current_tokens = sum(count for _, count in self.token_log)
+            current_tokens = sum(count for _, count, _ in self.token_log)
             if current_tokens + estimated_tokens > self.limit_tpm:
                 if self.token_log:
                     oldest = self.token_log[0][0]
@@ -112,10 +122,11 @@ class TPMManager:
             if max_wait > 0:
                 return max_wait
 
-            # Both limits OK — record this request
-            self.token_log.append((now, estimated_tokens))
+            # Both limits OK — record this request with unique ID
+            request_id = self._generate_request_id()
+            self.token_log.append((now, estimated_tokens, request_id))
             self.request_log.append(now)
-            return 0.0
+            return (0.0, request_id)
 
     async def record_usage(
         self,
@@ -205,6 +216,31 @@ class TPMManager:
             "quota_limit": self.limit_tpm
         }
 
+    def update_actual_tokens(self, estimated_tokens: int, actual_tokens: int, request_id: str = "") -> None:
+        """
+        Replace a pre-estimated token entry with actual usage after a worker completes.
+
+        Thread-safe. If request_id is provided, matches precisely by ID.
+        Otherwise falls back to matching by estimated token count (legacy).
+        If the entry already expired, adds a new entry with actual tokens.
+        """
+        with self._lock:
+            now = time.time()
+            self._prune_logs(now)
+
+            for i in range(len(self.token_log) - 1, -1, -1):
+                ts, count, rid = self.token_log[i]
+                if request_id and rid == request_id:
+                    self.token_log[i] = (ts, actual_tokens, rid)
+                    return
+                elif not request_id and count == estimated_tokens:
+                    self.token_log[i] = (ts, actual_tokens, rid)
+                    return
+
+            # If no match found (expired), add a new entry with actual tokens
+            self.token_log.append((now, actual_tokens, self._generate_request_id()))
+            self.request_log.append(now)
+
     def estimate_tokens(self, text: str) -> int:
         """
         Estimate token count from text (heuristic: 1 token ~ 4 chars).
@@ -218,7 +254,7 @@ class TPMManager:
             now = time.time()
             self._prune_logs(now)
 
-            tokens_used = sum(count for _, count in self.token_log)
+            tokens_used = sum(count for _, count, _ in self.token_log)
             requests_used = len(self.request_log)
             tokens_remaining = max(0, self.limit_tpm - tokens_used)
             requests_remaining = max(0, self.limit_rpm - requests_used)

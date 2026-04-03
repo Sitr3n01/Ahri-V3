@@ -1,6 +1,6 @@
 """
 Code Worker - Specialized agent for code analysis, generation, and execution.
-Uses Gemma 3 27B for code understanding and generation.
+Uses the configured agent model for code understanding and generation.
 
 Capabilities:
 - Code review and analysis
@@ -8,8 +8,11 @@ Capabilities:
 - Execute Python code in isolated sandbox
 - Debug assistance
 - Code refactoring suggestions
+
+ReAct mode: Iteratively generate → execute → observe → fix code.
 """
 import asyncio
+import os
 import subprocess
 import tempfile
 import time
@@ -20,10 +23,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.database import AgentWorkerTask
 from src.services.workers.base_worker import BaseWorker
+from src.services.workers.react_loop import ToolDefinition, ToolResult
 
 
 class CodeWorker(BaseWorker):
-    """Worker for code analysis, generation, and execution."""
+    """Worker for code analysis, generation, and execution with ReAct loop."""
+
+    # ── ReAct Configuration ──
+    REACT_ENABLED = True
+    REACT_MAX_ITERATIONS = 5
+    REACT_TOKEN_BUDGET = 4000
 
     ROLE_PROMPT = (
         "[ROLE: Senior Software Engineer]\n"
@@ -31,7 +40,7 @@ class CodeWorker(BaseWorker):
         "Always specify the programming language. Use best practices and idiomatic patterns.\n"
         "For reviews: focus on bugs, security issues, and performance — skip style nitpicks.\n"
         "For execution: sandbox-only, report stdout/stderr and exit code.\n"
-        "Output: JSON with structured results appropriate to the task_type."
+        "When using tools, choose the most appropriate one for each step."
     )
 
     def __init__(self, llm_service):
@@ -41,6 +50,123 @@ class CodeWorker(BaseWorker):
             default_model="LITE"
         )
         self.supported_languages = ["python", "javascript", "typescript", "bash", "sql"]
+
+    def get_tools(self) -> list[ToolDefinition]:
+        """Define tools available in ReAct mode."""
+        return [
+            ToolDefinition(
+                name="generate_code",
+                description="Generate code from a description. Input: {\"prompt\": str, \"language\": str}",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "prompt": {"type": "string"},
+                        "language": {"type": "string"}
+                    },
+                    "required": ["prompt"]
+                },
+                handler=self._tool_generate_code,
+            ),
+            ToolDefinition(
+                name="execute_python",
+                description="Execute Python code in sandbox and get stdout/stderr. Input: {\"code\": str}",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "code": {"type": "string"}
+                    },
+                    "required": ["code"]
+                },
+                handler=self._tool_execute_python,
+            ),
+            ToolDefinition(
+                name="analyze_code",
+                description="Analyze code for bugs, patterns, and complexity. Input: {\"code\": str, \"language\": str}",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "code": {"type": "string"},
+                        "language": {"type": "string"}
+                    },
+                    "required": ["code"]
+                },
+                handler=self._tool_analyze_code,
+            ),
+            ToolDefinition(
+                name="review_code",
+                description="Security and quality review. Input: {\"code\": str, \"language\": str}",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "code": {"type": "string"},
+                        "language": {"type": "string"}
+                    },
+                    "required": ["code"]
+                },
+                handler=self._tool_review_code,
+            ),
+        ]
+
+    # ── ReAct Tool Handlers ──────────────────────────────────────────
+
+    async def _tool_generate_code(self, params: dict) -> ToolResult:
+        """Tool wrapper for code generation."""
+        try:
+            result = await self._generate_code(params, None)
+            generated = result.get("generated", {})
+            code = generated.get("code", "") if isinstance(generated, dict) else str(generated)
+            explanation = generated.get("explanation", "") if isinstance(generated, dict) else ""
+            return ToolResult(
+                tool_name="generate_code",
+                success=True,
+                output=f"```{params.get('language', 'python')}\n{code}\n```\n\nExplanation: {explanation}",
+            )
+        except Exception as e:
+            return ToolResult(tool_name="generate_code", success=False, output="", error=str(e))
+
+    async def _tool_execute_python(self, params: dict) -> ToolResult:
+        """Tool wrapper for Python code execution."""
+        try:
+            result = await self._execute_code({"code": params.get("code", ""), "language": "python"}, None)
+            if result.get("success"):
+                output = result.get("stdout", "")
+                if result.get("stderr"):
+                    output += f"\nstderr: {result['stderr']}"
+                return ToolResult(
+                    tool_name="execute_python",
+                    success=True,
+                    output=f"Exit code: {result.get('return_code', 0)}\n{output}",
+                )
+            else:
+                error_msg = result.get("error", result.get("stderr", "Unknown error"))
+                return ToolResult(
+                    tool_name="execute_python",
+                    success=False,
+                    output=f"Exit code: {result.get('return_code', 1)}\nstdout: {result.get('stdout', '')}\nstderr: {result.get('stderr', '')}",
+                    error=error_msg,
+                )
+        except Exception as e:
+            return ToolResult(tool_name="execute_python", success=False, output="", error=str(e))
+
+    async def _tool_analyze_code(self, params: dict) -> ToolResult:
+        """Tool wrapper for code analysis."""
+        try:
+            result = await self._analyze_code(params, None)
+            analysis = result.get("analysis", {})
+            output = json.dumps(analysis, ensure_ascii=False, indent=2) if isinstance(analysis, dict) else str(analysis)
+            return ToolResult(tool_name="analyze_code", success=True, output=output)
+        except Exception as e:
+            return ToolResult(tool_name="analyze_code", success=False, output="", error=str(e))
+
+    async def _tool_review_code(self, params: dict) -> ToolResult:
+        """Tool wrapper for code review."""
+        try:
+            result = await self._review_code(params, None)
+            review = result.get("review", {})
+            output = json.dumps(review, ensure_ascii=False, indent=2) if isinstance(review, dict) else str(review)
+            return ToolResult(tool_name="review_code", success=True, output=output)
+        except Exception as e:
+            return ToolResult(tool_name="review_code", success=False, output="", error=str(e))
 
     async def execute(
         self,
@@ -206,7 +332,7 @@ Forneça a resposta em formato JSON:
                 capture_output=True,
                 text=True,
                 timeout=5,  # 5 second timeout
-                env={"PYTHONIOENCODING": "utf-8"}  # Minimal env
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"}  # Inherit env + ensure encoding
             )
 
             return {

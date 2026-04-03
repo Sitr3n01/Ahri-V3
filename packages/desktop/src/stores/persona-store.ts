@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { PersonaSummary, SpotifyContext } from '@ahri/shared';
-import { getPersonaTheme, type PersonaTheme } from '@ahri/shared';
+import { getPersonaTheme, mergePersonaTheme, type PersonaTheme } from '@ahri/shared';
 import { api } from '@/api/client';
 
 interface PersonaState {
@@ -17,6 +17,7 @@ interface PersonaState {
   fetchPersonas: (retryCount?: number) => Promise<void>;
   activatePersona: (name: string) => Promise<void>;
   getTheme: () => PersonaTheme;
+  getMergedTheme: (name: string) => PersonaTheme;
   setBackgroundOpacity: (opacity: number) => void;
   fetchSpotifyContext: () => Promise<void>;
   syncPersonaByMusic: () => Promise<string | null>;
@@ -74,7 +75,16 @@ export const usePersonaStore = create<PersonaState>()(
         }
       },
 
-      getTheme: () => getPersonaTheme(get().activePersona),
+      getTheme: () => {
+        return get().getMergedTheme(get().activePersona);
+      },
+
+      getMergedTheme: (name: string) => {
+        if (!name) return getPersonaTheme('');
+        const persona = get().personas.find(p => p.name && p.name.toLowerCase() === name.toLowerCase());
+        const staticTheme = getPersonaTheme(name);
+        return mergePersonaTheme(staticTheme, persona?.theme);
+      },
 
       setBackgroundOpacity: (opacity) => set({ backgroundOpacity: opacity }),
 

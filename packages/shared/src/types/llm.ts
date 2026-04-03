@@ -11,3 +11,13 @@ export interface AvailableModel {
   input_token_limit?: number;
   output_token_limit?: number;
 }
+
+export interface GoogleModelInfo {
+  name: string;
+  display_name: string;
+  supported_generation_methods: string[];
+}
+
+export interface GoogleModelCheckResponse {
+  models: GoogleModelInfo[];
+}

@@ -6,7 +6,10 @@ interface AhriAPI {
   agent: {
     openFile: (path: string) => Promise<void>;
     readFile: (path: string) => Promise<string>;
+    writeFile: (path: string, content: string) => Promise<{ success: true }>;
+    deleteFile: (path: string) => Promise<{ success: true }>;
     listDir: (path: string) => Promise<string[]>;
+    getPaths: () => Promise<{ root: string; data: string; personas: string }>;
     openUrl: (url: string) => Promise<void>;
     getSystemInfo: () => Promise<Record<string, unknown>>;
     readClipboard: () => Promise<string>;

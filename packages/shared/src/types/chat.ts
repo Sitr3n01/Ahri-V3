@@ -17,6 +17,7 @@ export interface FileAttachment {
 
 export interface ChatRequest {
   message: string;
+  session_id?: number;
   images: string[];
   video?: FileAttachment;
   pdfs?: FileAttachment[];
@@ -24,6 +25,7 @@ export interface ChatRequest {
   model: string;
   reasoning_level?: string;
   enable_thinking?: boolean;
+  auto_save_tags?: boolean;
 }
 
 export interface ChatResponse {

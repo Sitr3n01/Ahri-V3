@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('ahri', {
     openFile: (path: string) => ipcRenderer.invoke('agent:open-file', path),
     readFile: (path: string) => ipcRenderer.invoke('agent:read-file', path),
     writeFile: (path: string, content: string) => ipcRenderer.invoke('agent:write-file', { path, content }),
+    deleteFile: (path: string) => ipcRenderer.invoke('agent:delete-file', path),
     listDir: (path: string) => ipcRenderer.invoke('agent:list-dir', path),
     openUrl: (url: string) => ipcRenderer.invoke('agent:open-url', url),
     getSystemInfo: () => ipcRenderer.invoke('agent:system-info'),

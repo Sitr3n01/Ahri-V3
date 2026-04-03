@@ -27,7 +27,15 @@ class GeminiClient:
     def __init__(self, api_key: str = "", model_name: str = ""):
         self.api_key = api_key
         self._masked_key = f"{api_key[:8]}...{api_key[-4:]}" if api_key and len(api_key) > 12 else "***"
-        self.model_name = model_name
+
+        # Garante que o nome do modelo tenha o prefixo 'models/' se necessário
+        if model_name and not model_name.startswith("models/") and "/" not in model_name:
+            self.model_name = f"models/{model_name}"
+        else:
+            self.model_name = model_name
+
+        logger.debug(f"GeminiClient init: model={self.model_name!r}, key={self._masked_key}")
+
         self._client = genai.Client(api_key=api_key) if api_key else None
 
     def _build_thinking_config(self, reasoning_level: str = "medium") -> Optional[types.ThinkingConfig]:
@@ -77,11 +85,11 @@ class GeminiClient:
         if is_gemma:
             g_history.append(types.Content(
                 role="user",
-                parts=[types.Part.from_text(f"SYSTEM INSTRUCTIONS:\n{system_instruction}")]
+                parts=[types.Part(text=f"SYSTEM INSTRUCTIONS:\n{system_instruction}")]
             ))
             g_history.append(types.Content(
                 role="model",
-                parts=[types.Part.from_text("Entendido.")]
+                parts=[types.Part(text="Entendido.")]
             ))
 
         if history:
@@ -90,7 +98,7 @@ class GeminiClient:
                 content = str(msg.get("content", "."))
                 g_history.append(types.Content(
                     role=role,
-                    parts=[types.Part.from_text(content)]
+                    parts=[types.Part(text=content)]
                 ))
 
         chat = self._client.chats.create(
@@ -99,7 +107,17 @@ class GeminiClient:
             history=g_history,
         )
 
-        return chat.send_message_stream(message)
+        try:
+            stream = chat.send_message_stream(message)
+            for chunk in stream:
+                if chunk.text:
+                    yield chunk.text
+        except Exception as e:
+            logger.error(f"Gemini Streaming Error ({self.model_name}): {str(e)}")
+            if "404" in str(e):
+                yield f"[Gemini Error] Modelo '{self.model_name}' não encontrado (404). Verifique o nome exato no painel de Configurações > Teste de Modelos."
+            else:
+                yield f"[Gemini Error] {str(e)}"
 
     def generate_content_stream(
         self,
@@ -122,11 +140,18 @@ class GeminiClient:
             thinking_config=thinking,
         )
 
-        return self._client.models.generate_content_stream(
-            model=self.model_name,
-            contents=contents,
-            config=config,
-        )
+        try:
+            stream = self._client.models.generate_content_stream(
+                model=self.model_name,
+                contents=contents,
+                config=config,
+            )
+            for chunk in stream:
+                if chunk.text:
+                    yield chunk.text
+        except Exception as e:
+            logger.error(f"Gemini Multi-modal Error: {str(e)}")
+            yield f"[Gemini Error] {str(e)}"
 
     def generate_content_sync(self, contents, system_instruction: Optional[str] = None):
         """Gera conteúdo não-streaming (para vision worker, agent pre-pass).

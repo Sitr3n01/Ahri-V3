@@ -7,13 +7,13 @@ import { LoginView } from './features/auth/LoginView';
 import { AgentPanel } from './features/agent/AgentPanel';
 import { Fireflies } from './components/Fireflies';
 import { Toolbar } from './components/Toolbar';
+import { usePersonaTheme } from './hooks/usePersonaTheme';
 import { usePersonaStore } from './stores/persona-store';
 import { useAuthStore } from './stores/auth-store';
 import { useChatStore } from './stores/chat-store';
 import { useAgentStore } from './stores/agent-store';
 import { useUIStore } from './stores/ui-store';
 import { useThemeStore } from './stores/theme-store';
-import { getPersonaTheme } from '@ahri/shared';
 
 export type AppMode = 'chat' | 'agent' | 'settings';
 
@@ -65,8 +65,7 @@ export function App() {
     }
   }, [mode, isPanelOpen]);
 
-  // Aplica tema da persona ativa como CSS variables
-  const theme = getPersonaTheme(activePersona);
+  const theme = usePersonaTheme();
 
   if (!isAuthenticated) {
     return <LoginView />;
@@ -86,18 +85,13 @@ export function App() {
       <Toolbar mode={mode} setMode={setMode} previousMode={previousModeRef.current} />
 
       {/* Background image layer — always visible, no blur (VN aesthetic) */}
-      <style>{`
-        .persona-background {
-          background-image: url('/${theme.background}');
-          background-size: cover;
-          background-position: center;
-          background-repeat: no-repeat;
-        }
-      `}</style>
-      {/* Background image — sempre visivel */}
       <div
-        className="absolute inset-0 z-0 persona-background transition-opacity duration-700"
+        className="absolute inset-0 z-0 transition-opacity duration-700"
         style={{
+          backgroundImage: `url('/${theme.background}')`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
           opacity: isLight 
             ? 1 
             : (mode === 'chat' ? Math.max(backgroundOpacity / 100, 0.18) : 0.10),

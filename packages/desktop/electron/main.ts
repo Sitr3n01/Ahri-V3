@@ -198,6 +198,16 @@ function registerAgentIPC(): void {
     return { success: true };
   });
 
+  ipcMain.handle('agent:delete-file', async (_event, filePath: unknown) => {
+    if (typeof filePath !== 'string' || !filePath) throw new Error('Invalid path');
+    const resolved = validateDataPath(filePath);
+    // Use fs.promises.unlink to delete the file
+    if (fs.existsSync(resolved)) {
+      await fs.promises.unlink(resolved);
+    }
+    return { success: true };
+  });
+
   ipcMain.handle('agent:list-dir', async (_event, dirPath: unknown) => {
     if (typeof dirPath !== 'string' || !dirPath) throw new Error('Invalid path');
     const resolved = validateDataPath(dirPath);
@@ -244,6 +254,7 @@ function registerAgentIPC(): void {
     const rootDir = path.resolve(__dirname, '..', '..', '..');
     return {
       root: rootDir,
+      backend: path.join(rootDir, 'packages', 'backend'),
       data: path.join(rootDir, 'data'),
       personas: path.join(rootDir, 'data', 'personas'),
     };
@@ -373,7 +384,6 @@ function createWindow(): void {
     minWidth: 800,
     minHeight: 600,
     backgroundColor: '#06040c',
-    show: false,
     titleBarStyle: 'hidden',
     titleBarOverlay: {
       color: '#06040c',
@@ -386,6 +396,7 @@ function createWindow(): void {
       nodeIntegration: false,
       backgroundThrottling: false,
     },
+    show: true, // Keep immediate show for dev visibility
   });
 
   // Log console messages from renderer to terminal

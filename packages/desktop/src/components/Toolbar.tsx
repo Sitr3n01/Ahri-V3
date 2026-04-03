@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
-import { getPersonaTheme } from '@ahri/shared';
+import { usePersonaTheme } from '@/hooks/usePersonaTheme';
 import { usePersonaStore } from '@/stores/persona-store';
 import { useThemeStore } from '@/stores/theme-store';
 import { useUIStore } from '@/stores/ui-store';
 import { useAgentModeStore } from '@/stores/agent-mode-store';
+import { useEngineStore } from '@/stores/engine-store';
 import { useT } from '@/stores/i18n-store';
 import type { AppMode } from '@/App';
 
@@ -14,8 +15,7 @@ interface ToolbarProps {
 }
 
 export function Toolbar({ mode, setMode, previousMode = 'chat' }: ToolbarProps) {
-  const activePersona = usePersonaStore((s) => s.activePersona);
-  const theme = getPersonaTheme(activePersona);
+  const theme = usePersonaTheme();
   const appTheme = useThemeStore((s) => s.theme);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const sidebarOpen = useUIStore((s) => s.sidebarOpen);
@@ -217,15 +217,27 @@ export function Toolbar({ mode, setMode, previousMode = 'chat' }: ToolbarProps) 
           }}
         />
         {modes.map((m) => {
-          const isAgentRunning = m.key === 'agent' && useAgentModeStore.getState().activeExecution?.status === 'running';
+          const isAgentStoreRunning = useAgentModeStore.getState().activeExecution?.status === 'running';
+          const isEngineStoreRunning = useEngineStore.getState().isRunning;
+          const isAgentRunning = m.key === 'agent' && (isAgentStoreRunning || isEngineStoreRunning);
           return (
             <button
               key={m.key}
-              onClick={() => setMode(m.key)}
-              className="relative z-10 flex-1 py-1 text-xs font-medium rounded-md transition-colors duration-200 text-center flex items-center justify-center gap-1.5"
+              onClick={(e) => {
+                // Agent mode is restricted to Ctrl+Click for development
+                if (m.key === 'agent' && !e.ctrlKey && mode !== 'agent') {
+                  return;
+                }
+                setMode(m.key);
+              }}
+              className={`relative z-10 flex-1 py-1 text-xs font-medium rounded-md transition-all duration-200 text-center flex items-center justify-center gap-1.5 ${
+                m.key === 'agent' && mode !== 'agent' ? 'cursor-default' : 'cursor-pointer'
+              }`}
               style={{
                 color: mode === m.key ? 'rgba(0,0,0,0.85)' : 'var(--text-secondary)',
+                opacity: m.key === 'agent' && mode !== 'agent' ? 0.6 : 1,
               }}
+              title={m.key === 'agent' && mode !== 'agent' ? 'Modo Agente (Desenvolvimento)' : undefined}
             >
               {m.label}
               {isAgentRunning && mode !== 'agent' && (

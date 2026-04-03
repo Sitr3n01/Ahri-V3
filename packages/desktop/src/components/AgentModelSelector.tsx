@@ -26,8 +26,8 @@ const MODELS: { id: AgentModelId; name: string; shortName: string; provider: str
   },
   {
     id: 'qwen-3.5-local',
-    name: 'Qwen 3 8B',
-    shortName: 'Qwen 3',
+    name: 'Qwen 3.5 9b',
+    shortName: 'Qwen 3.5',
     provider: 'Ollama',
     color: '#F97316',
   },
@@ -75,22 +75,18 @@ export function AgentModelSelector({ theme }: AgentModelSelectorProps) {
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full transition-all duration-300 hover:bg-white/5 active:scale-95 border border-transparent"
+        className="flex items-center gap-1 px-2 py-1 rounded-full transition-all duration-300 hover:bg-white/5 active:scale-95 border border-transparent"
         style={{
           background: 'transparent',
           cursor: 'pointer',
-          fontSize: '0.75rem',
+          fontSize: '0.7rem',
           fontFamily: 'var(--font-sans)',
           fontWeight: 500,
           color: 'var(--text-secondary)',
         }}
       >
-        <span
-          className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-          style={{ background: activeModel.color }}
-        />
         <span>{activeModel.shortName}</span>
-        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"
           className={`opacity-40 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} >
           <polyline points="6 9 12 15 18 9" />
         </svg>
@@ -123,10 +119,6 @@ export function AgentModelSelector({ theme }: AgentModelSelectorProps) {
                     onClick={() => handleSelect(model.id)}
                     className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-[var(--surface-hover)]"
                   >
-                    <span
-                      className="w-2 h-2 rounded-full flex-shrink-0"
-                      style={{ background: model.color, opacity: isActive ? 1 : 0.5 }}
-                    />
                     <div className="flex-1 min-w-0">
                       <div className="text-xs font-medium" style={{ color: isActive ? model.color : 'var(--text-primary)' }}>
                         {model.name}
@@ -136,7 +128,7 @@ export function AgentModelSelector({ theme }: AgentModelSelectorProps) {
                       </div>
                     </div>
                     {isActive && (
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={model.color} strokeWidth="3" className="flex-shrink-0">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={model.color} strokeWidth="3" className="flex-shrink-0">
                         <polyline points="20 6 9 17 4 12" />
                       </svg>
                     )}

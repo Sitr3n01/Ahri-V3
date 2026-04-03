@@ -69,7 +69,8 @@ Conversa:
                 logger.warning("No API key for compaction, skipping")
                 return existing_summary, history
 
-            client = GeminiClient(api_key=key, model_name="gemini-3.1-flash-lite")
+            target_model = getattr(self.settings, "google_model_lite", "gemini-3.1-flash-lite-preview")
+            client = GeminiClient(api_key=key, model_name=target_model)
             summary = client.generate_content_rest(prompt, temperature=0.3)
 
             if summary:

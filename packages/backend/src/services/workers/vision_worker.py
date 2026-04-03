@@ -103,6 +103,11 @@ class VisionWorker(BaseWorker):
                 if not path.exists():
                     return {"error": f"Image not found: {path}"}
 
+                # Validate file size (max 50MB)
+                file_size = path.stat().st_size
+                if file_size > 50 * 1024 * 1024:
+                    return {"error": f"Image too large: {file_size} bytes (max 50MB)"}
+
                 with open(path, "rb") as f:
                     image_bytes = f.read()
                     image_base64 = base64.b64encode(image_bytes).decode('utf-8')
@@ -347,7 +352,7 @@ Forneça uma resposta detalhada e precisa em JSON:
         if not vision_key:
             raise Exception("No vision API key available for image analysis")
 
-        target_model = "gemini-2.5-flash"
+        target_model = getattr(self.llm.settings, "google_model_vision", "gemini-2.5-flash")
         if model.startswith("gemini-"):
             target_model = model
 

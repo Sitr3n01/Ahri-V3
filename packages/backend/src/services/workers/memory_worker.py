@@ -1,6 +1,6 @@
 """
 Memory Worker - Specialized agent for searching and analyzing user memories.
-Uses Gemma 3 4B for memory search and synthesis.
+Uses the configured agent model for memory search and synthesis.
 
 Capabilities:
 - Search episodic memories (knowledge/ files)
@@ -20,12 +20,14 @@ from src.services.workers.base_worker import BaseWorker
 class MemoryWorker(BaseWorker):
     """Worker for memory search and analysis."""
 
+    ENABLE_EVALUATION = False  # One-shot memory search, no iterative improvement
+
     ROLE_PROMPT = (
         "[ROLE: Memory Analyst]\n"
-        "You search and synthesize information from the user's memory systems.\n"
-        "Sources: episodic memories, persona session logs, user profile attributes.\n"
-        "Cross-reference multiple memory types for comprehensive answers.\n"
-        "Flag when memories may be outdated or contradictory.\n"
+        "You search and synthesize information from execution history and knowledge files.\n"
+        "Sources: episodic memories (knowledge files), past execution context.\n"
+        "Cross-reference sources for comprehensive answers.\n"
+        "Flag when information may be outdated.\n"
         "Output: JSON with 'findings', 'sources', and 'memory_type' fields."
     )
 
@@ -35,7 +37,7 @@ class MemoryWorker(BaseWorker):
             worker_type="Memory",
             default_model="LITE"
         )
-        self.data_dir = Path("data")
+        self.data_dir = Path(__file__).resolve().parent.parent.parent.parent / "data"
 
     async def execute(
         self,
@@ -69,11 +71,8 @@ class MemoryWorker(BaseWorker):
             if memory_type in ["episodic", "all"]:
                 results["episodic"] = await self._search_episodic(query, persona_name, limit, db)
 
-            if memory_type in ["persona", "all"]:
-                results["persona"] = await self._search_persona_memory(query, persona_name, limit, db)
-
-            if memory_type in ["profile", "all"]:
-                results["profile"] = await self._search_user_profile(query, db)
+            # Persona and profile searches disabled in agent mode.
+            # Agent mode is a pure function executor — no personality or user profile injection.
 
             # Synthesize results into coherent answer
             synthesis = await self._synthesize_memories(query, results, db)
@@ -240,22 +239,9 @@ class MemoryWorker(BaseWorker):
 
         episodic = results.get("episodic", [])
         if episodic:
-            context_parts.append("Memórias Episódicas:")
+            context_parts.append("Knowledge Files:")
             for mem in episodic[:5]:  # Top 5
-                context_parts.append(f"- [{mem['persona']}] {mem['file']}: {mem['snippet']}")
-
-        persona = results.get("persona", [])
-        if persona:
-            context_parts.append("\nLogs de Sessão:")
-            for mem in persona[:5]:
-                context_parts.append(f"- [{mem['persona']}] {mem['content']}")
-
-        profile_data = results.get("profile", {})
-        if profile_data.get("found"):
-            context_parts.append(f"\nPerfil do Usuário: {profile_data.get('user_name')}")
-            matches = profile_data.get("matches", {})
-            if matches:
-                context_parts.append(f"Atributos relevantes: {matches}")
+                context_parts.append(f"- [{mem.get('file', 'unknown')}]: {mem.get('snippet', '')}")
 
         if not context_parts:
             return {
@@ -283,7 +269,7 @@ Forneça uma resposta sintetizada em JSON:
 
         response = await self._call_llm(
             prompt=prompt,
-            model=self.default_model,
+            model=getattr(self.llm.settings, "google_model_memory", self.default_model),
             schema={
                 "type": "object",
                 "properties": {

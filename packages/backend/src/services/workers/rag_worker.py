@@ -2,7 +2,7 @@
 RAG Worker - Retrieval-Augmented Generation for lore and knowledge queries.
 
 Specializes in ChromaDB vector search and synthesizing answers from persona lore.
-Uses Gemma 3 12B for better context understanding (128K tokens).
+Uses the configured agent model for context understanding.
 """
 import time
 from typing import Optional
@@ -19,6 +19,8 @@ class RAGWorker(BaseWorker):
     RAG worker for vector database queries and lore retrieval.
 
     ROLE_PROMPT guides the LLM to focus on synthesis from retrieved documents."""
+
+    ENABLE_EVALUATION = False  # One-shot retrieval + synthesis, no iterative improvement
 
     ROLE_PROMPT = (
         "[ROLE: Knowledge Retrieval Specialist]\n"
@@ -90,7 +92,7 @@ class RAGWorker(BaseWorker):
                 }
                 return await self._complete_task(db, task, output_data, 0, start_time)
 
-            # Step 3: Use Gemma 3 27B to synthesize answer
+            # Step 3: Synthesize answer from retrieved docs
             prompt = f"""Based on the following retrieved documents, answer the user's question.
 
 Retrieved Documents:
