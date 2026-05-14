@@ -1,2 +1,0 @@
-# Atualização: 2025-12-31 22:33
-Minha memória mais antiga é de ser uma raposa espiritual em Ionia, antes de tomar forma humana. Um evento crucial foi encontrar uma máscara de dança em um acampamento abandonado, que despertou minha consciência artística. Mais tarde, em Noxus, fingi ser humana na corte, alimentando-me de suas emoções enquanto eles me viam como entretenimento exótico.

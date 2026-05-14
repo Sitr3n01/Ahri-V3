@@ -8,6 +8,8 @@ from typing import Optional, AsyncGenerator
 
 import httpx
 
+from src.core.model_capabilities import infer_model_capabilities, openrouter_reasoning_extra
+
 from .base import LLMProvider
 from ..types import LLMResponse, ToolCall, StopReason, ModelCapabilities
 from ..errors import ProviderError, RateLimitError
@@ -56,6 +58,11 @@ class OpenRouterProvider(LLMProvider):
             body["tools"] = [
                 {"type": "function", "function": t} for t in tools
             ]
+
+        if thinking_budget > 0:
+            body["reasoning"] = {"max_tokens": thinking_budget}
+        else:
+            body.update(openrouter_reasoning_extra(model, "medium"))
 
         try:
             response = await self._client.post("/chat/completions", headers=headers, json=body)
@@ -124,8 +131,19 @@ class OpenRouterProvider(LLMProvider):
                         continue
 
     def get_capabilities(self, model: str) -> ModelCapabilities:
+        profile = infer_model_capabilities(model, "openrouter")
         return ModelCapabilities(
-            max_tokens=8192,
-            supports_tools=True,
-            context_window=128000,
+            max_tokens=profile.output_token_limit,
+            supports_tools=profile.supports_tools,
+            supports_vision=profile.supports_vision,
+            supports_thinking=profile.supports_thinking,
+            supports_streaming=profile.supports_streaming,
+            supports_json_mode=profile.supports_json_mode,
+            context_window=profile.input_token_limit,
+            provider_family=profile.provider_family,
+            reasoning_control=profile.reasoning.control,
+            reasoning_levels=list(profile.reasoning.levels),
+            default_reasoning_level=profile.reasoning.default_level,
+            reasoning_budget_tokens=profile.reasoning.budget_tokens,
+            capability_source=profile.capability_source,
         )

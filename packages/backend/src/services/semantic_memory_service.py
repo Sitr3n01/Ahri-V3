@@ -19,6 +19,7 @@ from typing import Optional
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.time import utc_now
 from src.models.database import UserPreferences, SemanticMemoryTier, UserProfile
 
 logger = logging.getLogger("ahri.semantic_memory")
@@ -105,7 +106,7 @@ class SemanticMemoryService:
             if key in updatable and value is not None:
                 setattr(prefs, key, value)
 
-        prefs.updated_at = datetime.utcnow()
+        prefs.updated_at = utc_now()
         await self.db.commit()
         await self.db.refresh(prefs)
 
@@ -199,7 +200,7 @@ class SemanticMemoryService:
         for item in existing:
             if self._is_near_duplicate(content_lower, item.content.lower()):
                 # Reinforce: update timestamp and bump importance slightly
-                item.last_reinforced = datetime.utcnow()
+                item.last_reinforced = utc_now()
                 item.importance = min(10, max(item.importance, importance))
                 if source_session_id and not item.source_session_id:
                     item.source_session_id = source_session_id
@@ -215,8 +216,8 @@ class SemanticMemoryService:
             tier=tier,
             content=content.strip(),
             source_session_id=source_session_id,
-            created_at=datetime.utcnow(),
-            last_reinforced=datetime.utcnow(),
+            created_at=utc_now(),
+            last_reinforced=utc_now(),
             decay_date=decay_date,
             is_flagged=False,
             conflict_note="",
@@ -258,7 +259,7 @@ class SemanticMemoryService:
         Evaluates all items with a passed decay_date and demotes them to lower tiers.
         Returns the number of items that changed tier.
         """
-        now = datetime.utcnow()
+        now = utc_now()
         result = await self.db.execute(
             select(SemanticMemoryTier).where(
                 SemanticMemoryTier.decay_date <= now,
@@ -494,7 +495,7 @@ class SemanticMemoryService:
     # =========================================================================
 
     def _compute_decay_date(self, tier: str) -> Optional[datetime]:
-        now = datetime.utcnow()
+        now = utc_now()
         decay_offsets = {
             "immediate_context": timedelta(days=2),
             "top_of_mind": timedelta(days=7),

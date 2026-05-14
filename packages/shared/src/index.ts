@@ -4,5 +4,6 @@ export * from './types/persona.js';
 export * from './types/chat.js';
 export * from './types/memory.js';
 export * from './types/llm.js';
+export * from './types/settings.js';
 export * from './api-client/index.js';
 export * from './types/engine.js';

@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     gemini_api_key_free: str = ""
     openrouter_api_key: str = ""
     openrouter_model_name: str = "deepseek/deepseek-r1:free"
+    model_capabilities_overrides: str = ""
     google_model_pro: str = "gemini-2.0-pro-exp-02-05"
     google_model_flash: str = "gemini-2.5-flash"
     google_model_lite: str = "gemini-3.1-flash-lite-preview"
@@ -63,10 +64,16 @@ class Settings(BaseSettings):
     gh_token: str = ""
     gist_id: str = ""
 
+    # --- Gemma 4 (Google AI Studio) ---
+    gemma4_enabled: bool = True
+    gemma4_model_31b: str = "gemma-4-31b-it"
+    gemma4_model_26b: str = "gemma-4-26b-a4b"
+
     # --- LLM Providers ---
     google_ai_studio_api_key: str = ""  # Additional Google AI Studio key
     deepinfra_api_key: str = ""         # DeepInfra backup key
     ollama_base_url: str = "http://localhost:11434"  # Local self-hosted option
+    ollama_vision_patterns: str = "vision,llava,llama3.2-vision,llama4,gemma4"  # Model name patterns that support vision
 
     # --- Compaction ---
     compaction_threshold: int = 30       # Compact when history > N messages

@@ -2,6 +2,10 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
 import './styles/globals.css';
+import './styles/chat.css';
+import './styles/sidebar-personas.css';
+import './styles/settings.css';
+import './styles/settings-personas.css';
 
 // Global error handler para debug
 window.addEventListener('error', (event) => {

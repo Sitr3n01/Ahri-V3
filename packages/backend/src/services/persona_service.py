@@ -90,6 +90,8 @@ def list_personas() -> list[PersonaSummary]:
                 display_name=data["display_name"],
                 archetype=data.get("archetype", ""),
                 universe=data.get("universe", ""),
+                description=data.get("archetype", "") or data.get("universe", ""),
+                tagline=data.get("archetype", "") or "AI Companion",
                 theme=PersonaTheme(
                     # Returning empty string means "no custom override" — frontend mergePersonaTheme
                     # will fall back to the per-persona static theme instead of Ahri's defaults.
@@ -134,6 +136,8 @@ def get_persona_detail(name: str) -> Optional[PersonaDetail]:
         display_name=data["display_name"],
         archetype=data.get("archetype", ""),
         universe=data.get("universe", ""),
+        description=data.get("archetype", "") or data.get("universe", ""),
+        tagline=data.get("archetype", "") or "AI Companion",
         identity_text=data["identity_text"],
         spotify_genres=data.get("spotify_genres", []),
         has_lore=has_lore,

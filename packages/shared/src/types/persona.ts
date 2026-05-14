@@ -8,6 +8,8 @@ export interface PersonaSummary {
   display_name: string;
   archetype: string;
   universe: string;
+  description?: string;
+  tagline?: string;
   theme: PersonaTheme;
 }
 
@@ -32,4 +34,6 @@ export interface UpdatePersonaRequest {
   primary_color?: string;
   secondary_color?: string;
   identity_text?: string;
+  avatar_base64?: string;
+  background_base64?: string;
 }

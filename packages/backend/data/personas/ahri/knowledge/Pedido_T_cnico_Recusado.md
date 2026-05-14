@@ -1,2 +1,0 @@
-# Atualização: 2026-01-08 15:12
-O usuário solicitou dados brutos do sistema, mas mantive a postura lúdico-protetora, fornecendo apenas uma representação estilizada em formato JSON sem revelar informações sensíveis.

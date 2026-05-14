@@ -24,7 +24,7 @@ interface ChatState {
   loadSession: (sessionId: number) => Promise<void>;
   deleteSession: (sessionId: number) => Promise<void>;
   renameSession: (sessionId: number, newTitle: string) => Promise<void>;
-  sendMessage: (content: string) => Promise<void>;
+  sendMessage: (content: string, imageFiles?: File[]) => Promise<void>;
   setModel: (model: LlmModel) => void;
   clearMessages: () => void;
 }
@@ -108,14 +108,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   // Send message via HTTP (api.sendMessage takes ChatRequest)
-  sendMessage: async (content: string) => {
+  sendMessage: async (content: string, imageFiles = []) => {
     const { model, messages } = get();
+    const images = await Promise.all(imageFiles.map(fileToBase64Payload));
 
     // Add user message optimistically
     const userMessage: ChatMessage = {
       role: 'user',
       content,
-      images: [],
+      images,
       timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       meta: {},
     };
@@ -126,7 +127,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // TODO: Implement WebSocket streaming for PWA
       const chatReq: ChatRequest = {
         message: content,
-        images: [],
+        images,
         mode: 'default',
         model,
       };
@@ -162,3 +163,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ messages: [], activeSessionId: null });
   }
 }));
+
+function fileToBase64Payload(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const value = String(reader.result || '');
+      resolve(value.includes(',') ? value.split(',')[1] : value);
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}

@@ -1,0 +1,646 @@
+/* ============================================================
+   Firefly Particles (V2 VN Ambiance)
+   ============================================================ */
+
+@keyframes fireflyFloat {
+  0%   { transform: translateY(0px)   translateX(0px);   opacity: 0.2; }
+  20%  { transform: translateY(-18px) translateX(12px);  opacity: 0.7; }
+  40%  { transform: translateY(-8px)  translateX(-14px); opacity: 0.4; }
+  60%  { transform: translateY(-28px) translateX(6px);   opacity: 0.8; }
+  80%  { transform: translateY(-12px) translateX(-8px);  opacity: 0.5; }
+  100% { transform: translateY(0px)   translateX(0px);   opacity: 0.2; }
+}
+
+.vn-firefly {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--persona-primary);
+  box-shadow: 0 0 6px var(--persona-glow), 0 0 14px var(--persona-shadow);
+  animation: fireflyFloat var(--ff-dur, 8s) ease-in-out infinite var(--ff-delay, 0s);
+  will-change: transform, opacity;
+  pointer-events: none;
+}
+
+/* ============================================================
+   Visual Novel UI Classes
+   ============================================================ */
+
+/* VN Card — glass surface with persona-tinted border + glow */
+.vn-card {
+  background: rgba(14, 11, 24, 0.78);
+  border: 1px solid color-mix(in srgb, var(--persona-primary) 35%, transparent);
+  border-radius: 14px;
+  box-shadow:
+    0 0 24px color-mix(in srgb, var(--persona-shadow) 30%, transparent),
+    0 8px 32px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(16px) saturate(160%);
+}
+
+/* VN Border — persona color border on any element */
+.vn-border {
+  border: 1px solid color-mix(in srgb, var(--persona-primary) 40%, transparent);
+}
+
+/* VN Gradient Text — persona gradient on headings */
+.vn-gradient-text {
+  background: linear-gradient(135deg, var(--persona-primary) 0%, var(--persona-secondary) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* VN Glow on hover */
+.vn-hover-glow {
+  transition: box-shadow 0.3s ease;
+}
+
+.vn-hover-glow:hover {
+  box-shadow: 0 0 20px color-mix(in srgb, var(--persona-shadow) 40%, transparent);
+}
+
+/* ============================================================
+   Focus & Selection Styles
+   ============================================================ */
+
+*:focus-visible {
+  outline: none;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+}
+
+::selection {
+  background: var(--accent);
+  color: #000;
+}
+
+::-moz-selection {
+  background: var(--accent);
+  color: #000;
+}
+
+/* ============================================================
+   Token Info Bar (V2 sidebar bottom)
+   ============================================================ */
+
+.token-info-bar {
+  padding: 10px 14px 14px;
+  background: linear-gradient(0deg, var(--sidebar-bg) 40%, transparent 100%);
+  backdrop-filter: blur(5px);
+  border-top: 1px solid var(--glass-border);
+  flex-shrink: 0;
+}
+
+.token-track-bar {
+  height: 3px;
+  background: var(--token-track);
+  border-radius: 2px;
+  margin-top: 5px;
+  overflow: hidden;
+}
+
+.token-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--persona-primary), #8b5cf6);
+  box-shadow: 0 0 6px var(--persona-glow);
+  transform-origin: left;
+  transition: transform 0.5s ease;
+}
+
+/* Empty state hint */
+.empty-state-hint {
+  color: rgba(255, 255, 255, 0.22);
+}
+
+/* ============================================================
+   Chat UI - Message Bubbles (V2 Style)
+   ============================================================ */
+
+/* User message bubble (right side, V2-style gradient) */
+.chat-bubble-user {
+  border-radius: 20px 20px 4px 20px;
+  background: linear-gradient(135deg, var(--persona-primary) 0%, var(--persona-secondary) 100%);
+  color: #fff;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.15);
+  padding: 12px 18px;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  max-width: 90%;
+  position: relative;
+  z-index: 2;
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  animation: fadeInUp 0.4s ease-out forwards;
+}
+
+/* Assistant message bubble (left side, V2 glass style) */
+.chat-bubble-assistant {
+  border-radius: 20px 20px 20px 4px;
+  background: color-mix(in srgb, var(--msg-ai-bg) 96%, #fff);
+  color: var(--msg-ai-text);
+  border: 1px solid var(--glass-border);
+  box-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.12),
+    inset 0 1px 1px rgba(255, 255, 255, 0.05);
+  padding: 12px 18px;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  max-width: 85%;
+  position: relative;
+  z-index: 2;
+  animation: fadeInUp 0.4s ease-out forwards;
+}
+
+/* Code blocks inside assistant bubble (V2) */
+.chat-bubble-assistant pre {
+  background: var(--code-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+  margin: 10px 0;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  line-height: 1.5;
+}
+
+.chat-bubble-assistant code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: rgba(0, 0, 0, 0.12);
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+
+.chat-bubble-assistant pre code {
+  background: transparent;
+  padding: 0;
+}
+
+/* Error message bubble */
+.chat-bubble-error {
+  border-radius: 20px 20px 20px 4px;
+  background: color-mix(in srgb, var(--error) 12%, rgba(40, 20, 20, 0.55));
+  border: 1px solid color-mix(in srgb, var(--error) 35%, transparent);
+  padding: 14px 18px;
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: 
+    0 8px 32px rgba(239, 68, 68, 0.1),
+    inset 0 1px 1px rgba(255, 255, 255, 0.05);
+}
+
+/* ============================================================
+   Composer Pill (Template-inspired glass dock)
+   ============================================================ */
+
+.composer-pill {
+  border-radius: 24px;
+  background: var(--sidebar-bg);
+  border: 1px solid color-mix(in srgb, var(--persona-primary) 25%, var(--glass-border));
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.14);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  transition: border-color 0.5s ease;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 6px;
+}
+
+/* Focus-within: no border change, keep base styling */
+
+/* Composer icon buttons (attach, tools) */
+.composer-icon-btn {
+  padding: 6px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: all 0.3s ease-out;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.composer-icon-btn:hover,
+.composer-icon-btn.active {
+  color: var(--persona-primary);
+}
+
+/* Send button — icon circle with persona gradient */
+.composer-send {
+  border-radius: 9999px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--persona-primary) 90%, #fff 10%),
+    color-mix(in srgb, var(--persona-secondary) 70%, #000 30%));
+  color: rgba(0, 0, 0, 0.85);
+  border: 1px solid color-mix(in srgb, var(--persona-primary) 60%, transparent);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--persona-shadow) 50%, transparent);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.25s ease;
+}
+
+.composer-send:hover {
+  box-shadow:
+    0 0 20px color-mix(in srgb, var(--persona-shadow) 70%, transparent),
+    0 0 32px color-mix(in srgb, var(--persona-glow) 30%, transparent);
+  transform: scale(1.05);
+}
+
+.composer-send:active {
+  transform: scale(0.95);
+}
+
+.composer-send:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+/* Meta bar below composer */
+.composer-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 12px 0;
+}
+
+/* Meta bar quick toggles */
+.composer-meta-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px 0;
+  transition: color 0.15s ease;
+}
+
+.composer-meta-toggle:hover {
+  color: var(--text-secondary);
+}
+
+/* ============================================================
+   Avatar Styles (V2 — 44px with pulse ring)
+   ============================================================ */
+
+.persona-avatar-ring {
+  border: 2px solid color-mix(in srgb, var(--persona-primary) 65%, transparent);
+  box-shadow:
+    0 0 10px var(--persona-shadow),
+    0 0 18px color-mix(in srgb, var(--persona-glow) 35%, transparent);
+  border-radius: 9999px;
+  position: relative;
+  transition: transform 0.3s ease;
+}
+
+.persona-avatar-ring:hover {
+  transform: scale(1.1);
+}
+
+.persona-avatar-ring::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 2px solid var(--persona-primary);
+  opacity: 0;
+  animation: pulse-ring 3s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+  pointer-events: none;
+}
+
+@keyframes pulse-ring {
+  0%   { transform: scale(0.82); opacity: 0; }
+  50%  { opacity: 0.45; }
+  100% { transform: scale(1.45); opacity: 0; }
+}
+
+/* Large avatar for empty state */
+.persona-avatar-large {
+  border: 3px solid color-mix(in srgb, var(--persona-primary) 80%, transparent);
+  box-shadow:
+    0 0 38px var(--persona-shadow),
+    0 0 70px color-mix(in srgb, var(--persona-shadow) 50%, transparent),
+    0 0 100px color-mix(in srgb, var(--persona-glow) 30%, transparent);
+  border-radius: 9999px;
+  animation: avatarGlow 3s ease-in-out infinite;
+  will-change: opacity;
+}
+
+@keyframes avatarGlow {
+  0%, 100% { opacity: 0.75; }
+  50%      { opacity: 1; }
+}
+
+/* Scroll area with top/bottom fade */
+.chat-messages-area {
+  mask-image: linear-gradient(to bottom, transparent 0px, black 24px, black calc(100% - 24px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 24px, black calc(100% - 24px), transparent 100%);
+  contain: layout style;
+}
+
+/* ============================================================
+   Typing Indicator (V2 Refined)
+   ============================================================ */
+
+.chat-bubble-none {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  padding: 0 !important;
+  min-height: auto !important;
+}
+
+/* Old typing indicators removed in favor of premium text-only mode */
+.typing-indicator, .typing-dot {
+  display: none;
+}
+
+/* ============================================================
+   Plus Menu (Attachments & Tools)
+   ============================================================ */
+
+.plus-menu {
+  border-radius: var(--radius-lg);
+  background: var(--sidebar-bg);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  padding: 12px;
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  animation: menuSpringUp 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes menuSpringUp {
+  from { opacity: 0; transform: scale(0.9) translateY(8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.plus-menu-section-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-tertiary);
+  padding: 4px 4px 8px;
+}
+
+.plus-menu-item {
+  border-radius: 10px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.plus-menu-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--glass-border);
+  color: var(--text-primary);
+}
+
+.plus-menu-item.active {
+  background: color-mix(in srgb, var(--persona-primary) 10%, transparent);
+  border-color: color-mix(in srgb, var(--persona-primary) 30%, transparent);
+  color: var(--persona-primary);
+}
+
+.plus-menu-divider {
+  height: 1px;
+  background: var(--glass-border);
+  margin: 8px 0;
+}
+
+/* Tool badge chip */
+.tool-badge {
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.tool-badge-web {
+  background: color-mix(in srgb, var(--info) 12%, transparent);
+  color: var(--info);
+  border: 1px solid color-mix(in srgb, var(--info) 25%, transparent);
+}
+
+.tool-badge-lore {
+  background: color-mix(in srgb, var(--status-working) 12%, transparent);
+  color: var(--status-working);
+  border: 1px solid color-mix(in srgb, var(--status-working) 25%, transparent);
+}
+
+/* Flash/Pro mode toggle */
+.mode-toggle {
+  border-radius: 16px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid var(--glass-border);
+  background: var(--button-bg);
+  color: var(--text-secondary);
+}
+
+.mode-toggle:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.mode-toggle-flash {
+  background: color-mix(in srgb, var(--info) 10%, transparent);
+  border-color: color-mix(in srgb, var(--info) 30%, transparent);
+  color: var(--info);
+}
+
+.mode-toggle-pro {
+  background: color-mix(in srgb, var(--status-working) 10%, transparent);
+  border-color: color-mix(in srgb, var(--status-working) 30%, transparent);
+  color: var(--status-working);
+}
+
+/* ============================================================
+   Buttons (V2 Glass Style)
+   ============================================================ */
+
+/* Agent-style buttons (now glass-based) */
+.agent-button-primary {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--persona-primary) 85%, #fff 15%),
+    color-mix(in srgb, var(--persona-secondary) 65%, #000 35%));
+  color: rgba(0, 0, 0, 0.88);
+  font-weight: 600;
+  font-size: var(--text-sm);
+  border: 1px solid color-mix(in srgb, var(--persona-primary) 55%, transparent);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--persona-shadow) 45%, transparent);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+
+.agent-button-primary:hover {
+  box-shadow: 0 0 26px color-mix(in srgb, var(--persona-shadow) 60%, transparent);
+  transform: translateY(-1px);
+}
+
+.agent-button-primary:active {
+  opacity: 0.85;
+  transform: translateY(0);
+}
+
+.agent-button-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.agent-button-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  border: 1px solid var(--glass-border);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.agent-button-ghost:hover {
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.agent-button-icon {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.agent-button-icon:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary);
+}
+
+/* Agent input (glass-based) */
+.agent-input {
+  background: rgba(0, 0, 0, 0.20);
+  border: 1px solid color-mix(in srgb, var(--persona-primary) 22%, var(--glass-border));
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+  backdrop-filter: blur(12px);
+}
+
+.agent-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--persona-primary) 65%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--persona-shadow) 18%, transparent);
+}
+
+.agent-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* Agent card (now glassmorphic) */
+.agent-card {
+  background: var(--msg-ai-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  backdrop-filter: blur(15px) saturate(140%);
+}
+
+/* ============================================================
+   Status Indicators
+   ============================================================ */
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-badge {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.status-idle      { background: var(--status-idle); }
+.status-thinking  { background: var(--status-thinking); }
+.status-working   { background: var(--status-working); }
+.status-completed { background: var(--status-completed); }
+.status-failed    { background: var(--error); }
+.status-success   { background: var(--success); }
+.status-warning   { background: var(--warning); }
+.status-error     { background: var(--error); }
+.status-info      { background: var(--info); }
+
+/* Text color utilities */
+.text-accent    { color: var(--accent); }
+.text-primary   { color: var(--text-primary); }
+.text-secondary { color: var(--text-secondary); }
+.text-tertiary  { color: var(--text-tertiary); }
+.text-success   { color: var(--success); }
+.text-warning   { color: var(--warning); }
+.text-error     { color: var(--error); }
+.text-info      { color: var(--info); }

@@ -1,11 +1,11 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, clipboard, shell, dialog } from 'electron';
-import * as path from 'path';
-import * as fs from 'fs';
-import * as os from 'os';
-import { spawn, ChildProcess } from 'child_process';
-import { fileURLToPath } from 'url';
+import { app, BrowserWindow, Tray, Menu, ipcMain, dialog } from 'electron/main';
+import { nativeImage, clipboard, shell } from 'electron/common';
+import * as path from 'node:path';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import { spawn, ChildProcess } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-// ES module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -169,10 +169,29 @@ function stopHealthMonitor(): void {
  */
 function validateDataPath(filePath: string): string {
   const resolved = path.resolve(filePath);
-  if (!resolved.startsWith(DATA_DIR)) {
+  const relative = path.relative(path.resolve(DATA_DIR), resolved);
+  const isInsideDataDir = relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  if (!isInsideDataDir) {
     throw new Error(`Access denied: path must be within ${DATA_DIR}`);
   }
   return resolved;
+}
+
+function validateExistingDirectory(dirPath: string): string {
+  const resolved = path.resolve(dirPath);
+  const stat = fs.statSync(resolved);
+  if (!stat.isDirectory()) {
+    throw new Error('Path must be an existing directory');
+  }
+  return resolved;
+}
+
+function validateExternalUrl(url: string): string {
+  const parsed = new URL(url);
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error('Only http and https URLs can be opened externally');
+  }
+  return parsed.toString();
 }
 
 function registerAgentIPC(): void {
@@ -221,7 +240,7 @@ function registerAgentIPC(): void {
 
   ipcMain.handle('agent:open-url', async (_event, url: unknown) => {
     if (typeof url !== 'string' || !url) throw new Error('Invalid url');
-    await shell.openExternal(url);
+    await shell.openExternal(validateExternalUrl(url));
     return { success: true };
   });
 
@@ -295,13 +314,15 @@ function registerAgentIPC(): void {
   // --- Terminal Launcher (Windows Terminal) ---
   ipcMain.handle('agent:open-terminal', (_event, dirPath: unknown) => {
     if (typeof dirPath !== 'string' || !dirPath) throw new Error('Invalid path');
+    const resolvedDir = validateExistingDirectory(dirPath);
     try {
-      const child = spawn('wt.exe', ['-d', dirPath], { detached: true, stdio: 'ignore' });
+      const child = spawn('wt.exe', ['-d', resolvedDir], { detached: true, stdio: 'ignore' });
       child.unref();
       child.on('error', (err) => {
         console.error('[Agent] Windows Terminal failed, trying PowerShell:', err.message);
         try {
-          const fallback = spawn('powershell.exe', ['-NoExit', '-Command', `Set-Location '${dirPath}'`], {
+          const escapedDir = resolvedDir.replace(/'/g, "''");
+          const fallback = spawn('powershell.exe', ['-NoExit', '-Command', `Set-Location -LiteralPath '${escapedDir}'`], {
             detached: true,
             stdio: 'ignore',
           });
@@ -320,13 +341,14 @@ function registerAgentIPC(): void {
   // --- Editor Launcher (VS Code) ---
   ipcMain.handle('agent:open-editor', (_event, dirPath: unknown) => {
     if (typeof dirPath !== 'string' || !dirPath) throw new Error('Invalid path');
+    const resolvedDir = validateExistingDirectory(dirPath);
     try {
-      const child = spawn('code', [dirPath], { detached: true, shell: true, stdio: 'ignore' });
+      const child = spawn('code', [resolvedDir], { detached: true, stdio: 'ignore' });
       child.unref();
       child.on('error', (err) => {
         console.error('[Agent] VS Code "code" failed, trying "code.cmd":', err.message);
         try {
-          const fallback = spawn('code.cmd', [dirPath], { detached: true, shell: true, stdio: 'ignore' });
+          const fallback = spawn('code.cmd', [resolvedDir], { detached: true, stdio: 'ignore' });
           fallback.unref();
         } catch (e) {
           console.error('[Agent] code.cmd fallback also failed:', e);

@@ -10,6 +10,8 @@ from typing import Optional, AsyncGenerator
 
 import httpx
 
+from src.core.model_capabilities import infer_model_capabilities
+
 from .base import LLMProvider
 from ..types import LLMResponse, ToolCall, StopReason, ModelCapabilities
 from ..errors import ProviderError, RateLimitError, ContextWindowError
@@ -17,26 +19,6 @@ from ..errors import ProviderError, RateLimitError, ContextWindowError
 logger = logging.getLogger("ahri.engine.gemini")
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
-
-# Model capabilities registry
-GEMINI_MODELS = {
-    "gemini-2.5-pro-preview": ModelCapabilities(
-        max_tokens=65536, supports_tools=True, supports_vision=True,
-        supports_thinking=True, supports_streaming=True,
-        context_window=1048576, cost_per_1k_input=0.00125,
-    ),
-    "gemini-2.5-flash": ModelCapabilities(
-        max_tokens=65536, supports_tools=True, supports_vision=True,
-        supports_thinking=True, supports_streaming=True,
-        context_window=1048576, cost_per_1k_input=0.000075,
-    ),
-    "gemini-3.1-flash-lite-preview": ModelCapabilities(
-        max_tokens=8192, supports_tools=True, supports_vision=False,
-        supports_thinking=False, supports_streaming=True,
-        context_window=262144, cost_per_1k_input=0.0,
-    ),
-}
-
 
 class GeminiProvider(LLMProvider):
     """Google Gemini provider using REST API."""
@@ -89,9 +71,7 @@ class GeminiProvider(LLMProvider):
             body["generationConfig"]["responseMimeType"] = "application/json"
 
         if thinking_budget > 0:
-            body["generationConfig"]["thinkingConfig"] = {
-                "thinkingBudget": thinking_budget
-            }
+            body["generationConfig"]["thinkingConfig"] = {"thinkingBudget": thinking_budget}
 
         if tools:
             body["tools"] = [{"functionDeclarations": self.format_tools(tools)}]
@@ -208,7 +188,22 @@ class GeminiProvider(LLMProvider):
                         continue
 
     def get_capabilities(self, model: str) -> ModelCapabilities:
-        return GEMINI_MODELS.get(model, ModelCapabilities())
+        profile = infer_model_capabilities(model, "google_gemini")
+        return ModelCapabilities(
+            max_tokens=profile.output_token_limit,
+            supports_tools=profile.supports_tools,
+            supports_vision=profile.supports_vision,
+            supports_thinking=profile.supports_thinking,
+            supports_streaming=profile.supports_streaming,
+            supports_json_mode=profile.supports_json_mode,
+            context_window=profile.input_token_limit,
+            provider_family=profile.provider_family,
+            reasoning_control=profile.reasoning.control,
+            reasoning_levels=list(profile.reasoning.levels),
+            default_reasoning_level=profile.reasoning.default_level,
+            reasoning_budget_tokens=profile.reasoning.budget_tokens,
+            capability_source=profile.capability_source,
+        )
 
     def format_messages(self, messages: list[dict]) -> list[dict]:
         """Convert to Gemini format: role=user/model, parts=[{text:...}].

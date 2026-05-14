@@ -3,6 +3,10 @@
 **Last Updated:** 2026-02-11
 **Status:** Production Ready
 
+> Agent rule source: read `AGENTS.md` first. This file adds historical context,
+> but organizational, scalability, hygiene, and quality-gate requirements live
+> in `AGENTS.md`.
+
 ---
 
 ## What Is This Project?

@@ -1,8 +1,4 @@
 {
   "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "module": "CommonJS",
-    "moduleResolution": "node"
-  },
-  "include": ["preload.ts"]
+  "include": ["preload.ts", "electron-shims.d.ts"]
 }

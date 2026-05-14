@@ -3,10 +3,12 @@
  */
 
 export interface ChatMessage {
+  id?: number | string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   images: string[];
   timestamp: string;
+  created_at?: string;
   meta: Record<string, unknown>;
 }
 
@@ -30,8 +32,9 @@ export interface ChatRequest {
 
 export interface ChatResponse {
   message: ChatMessage;
-  agent_tasks: AgentTask[];
   memory_notifications: string[];
+  search_context?: string;
+  search_used?: boolean;
 }
 
 export interface SessionSummary {
@@ -59,6 +62,3 @@ export interface WsSyncEvent {
   data: unknown;
 }
 
-// Re-export for convenience
-import type { AgentTask } from './agent.js';
-export type { AgentTask };

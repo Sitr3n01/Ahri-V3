@@ -276,9 +276,16 @@ def build_system_prompt(
     if compacted_context:
         prompt += f"\n\n[CONTEXTO ANTERIOR DA CONVERSA]\n{compacted_context}\n"
 
-    # Camada 2.5: Search Context (Web or Lore)
+    # Camada 2.5: Search Context (Dual Web Search)
     if search_context:
         prompt += f"\n\n[INFORMACOES RECUPERADAS (PESQUISA)]\n{search_context}\n"
+        prompt += (
+            "\n[INSTRUCAO DE PESQUISA] Você consultou a web para responder. "
+            "Informe brevemente ao usuário que realizou uma pesquisa na web. "
+            "Se houver resultados de 'FONTES CREDENCIADAS' e 'COMUNIDADES', "
+            "apresente-os claramente separados na sua resposta, indicando a diferença entre "
+            "informações de fontes oficiais/jornalísticas e o que comunidades/fóruns discutem sobre o assunto.\n"
+        )
 
     # Camada 3: Spotify context
     if spotify_context:

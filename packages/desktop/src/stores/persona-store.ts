@@ -3,13 +3,15 @@ import { persist } from 'zustand/middleware';
 import type { PersonaSummary, SpotifyContext } from '@ahri/shared';
 import { getPersonaTheme, mergePersonaTheme, type PersonaTheme } from '@ahri/shared';
 import { api } from '@/api/client';
+import { useChatStore } from './chat-store';
 
 interface PersonaState {
   activePersona: string;
   personas: PersonaSummary[];
   isLoading: boolean;
+  isActivatingPersona: boolean; // lock enquanto POST /activate está pendente
   error: string | null;
-  backgroundOpacity: number; // 0-100 (percentage)
+  backgroundOpacity: number;
   spotifyContext: SpotifyContext | null;
   isSyncingSpotify: boolean;
 
@@ -29,8 +31,9 @@ export const usePersonaStore = create<PersonaState>()(
       activePersona: 'ahri',
       personas: [],
       isLoading: false,
+      isActivatingPersona: false,
       error: null,
-      backgroundOpacity: 40, // Default 40%
+      backgroundOpacity: 40,
       spotifyContext: null,
       isSyncingSpotify: false,
 
@@ -42,6 +45,7 @@ export const usePersonaStore = create<PersonaState>()(
           const data = await api.listPersonas();
           set({
             personas: data.personas,
+            // Backend é a fonte da verdade da persona ativa
             activePersona: data.active,
             isLoading: false,
             error: null,
@@ -51,10 +55,7 @@ export const usePersonaStore = create<PersonaState>()(
           console.error(`Failed to fetch personas (attempt ${retryCount + 1}):`, e);
 
           if (retryCount < 2) {
-            // Auto-retry after 2s, max 2 retries
-            setTimeout(() => {
-              get().fetchPersonas(retryCount + 1);
-            }, 2000);
+            setTimeout(() => get().fetchPersonas(retryCount + 1), 2000);
           } else {
             set({ isLoading: false, error: message });
           }
@@ -62,26 +63,37 @@ export const usePersonaStore = create<PersonaState>()(
       },
 
       activatePersona: async (name) => {
-        const previousPersona = get().activePersona;
-        // Optimistic update
-        set({ activePersona: name });
+        // Cancela streaming ativo antes de trocar contexto — evita vazamento
+        // de chunks de uma persona aparecendo no chat de outra
+        useChatStore.getState().cancelStreaming();
+
+        // Sem optimistic update: mostramos loading e esperamos confirmação do backend.
+        // Motivo: optimistic update trigga useEffect([activePersona]) → fetchSessions
+        // prematuro, que depois é triggado de novo no rollback caso a API falhe.
+        set({ isActivatingPersona: true });
+
         try {
           const result = await api.activatePersona(name);
-          set({ activePersona: result.active });
+
+          // Só atualiza estado e busca sessões após confirmação do backend
+          set({ activePersona: result.active, isActivatingPersona: false });
+
+          // Busca sessões da nova persona após troca confirmada
+          await useChatStore.getState().fetchSessions(result.active);
         } catch (e) {
           console.error('Failed to activate persona:', e);
-          // Rollback on failure
-          set({ activePersona: previousPersona });
+          // Sem rollback necessário — nunca fizemos optimistic update
+          set({ isActivatingPersona: false });
         }
       },
 
-      getTheme: () => {
-        return get().getMergedTheme(get().activePersona);
-      },
+      getTheme: () => get().getMergedTheme(get().activePersona),
 
       getMergedTheme: (name: string) => {
         if (!name) return getPersonaTheme('');
-        const persona = get().personas.find(p => p.name && p.name.toLowerCase() === name.toLowerCase());
+        const persona = get().personas.find(
+          (p) => p.name && p.name.toLowerCase() === name.toLowerCase()
+        );
         const staticTheme = getPersonaTheme(name);
         return mergePersonaTheme(staticTheme, persona?.theme);
       },
@@ -102,7 +114,10 @@ export const usePersonaStore = create<PersonaState>()(
         try {
           const result = await api.syncPersonaByMusic();
           if (result.switched) {
+            // Cancela streaming e busca sessões da persona sincronizada
+            useChatStore.getState().cancelStreaming();
             set({ activePersona: result.persona, isSyncingSpotify: false });
+            await useChatStore.getState().fetchSessions(result.persona);
             return result.persona;
           }
           set({ isSyncingSpotify: false });
@@ -116,7 +131,12 @@ export const usePersonaStore = create<PersonaState>()(
     }),
     {
       name: 'persona-preferences',
-      partialize: (state) => ({ backgroundOpacity: state.backgroundOpacity }),
+      // Persiste activePersona para evitar flash para persona padrão antes
+      // da API responder. O fetchPersonas() sobrescreve com o valor do backend.
+      partialize: (state) => ({
+        backgroundOpacity: state.backgroundOpacity,
+        activePersona: state.activePersona,
+      }),
     }
   )
 );

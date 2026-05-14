@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer } from 'electron/renderer';
 
 /**
  * Preload script - ponte segura entre o processo main (Node.js) e o renderer (React).

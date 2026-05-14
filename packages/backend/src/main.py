@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from src.config import get_settings
 from src.models.database import init_db, close_db
-from src.routers import auth, chat, personas, memory, sessions, search, spotify, settings
+from src.routers import auth, chat, personas, memory, sessions, search, spotify, settings, agent
 
 logger = logging.getLogger("ahri.main")
 
@@ -137,6 +137,7 @@ app.include_router(sessions.router, prefix="/sessions", tags=["Sessions"])
 app.include_router(search.router, prefix="/search", tags=["Search"])
 app.include_router(spotify.router, prefix="/spotify", tags=["Spotify"])
 app.include_router(settings.router, prefix="/settings", tags=["Settings"])
+app.include_router(agent.router, prefix="/agent", tags=["Agent Compatibility"])
 app.include_router(engine_v2_router)
 
 # Serve static files from data directory

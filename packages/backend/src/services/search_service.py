@@ -107,3 +107,8 @@ class SearchService:
         except Exception as e:
             logger.error(f"Search error: {e}")
             return {"error": str(e), "results": [], "remaining_quota": remaining}
+
+    async def community_search(self, query: str, max_results: int = 5) -> dict:
+        """Busca permissiva focada em comunidades (Reddit, fóruns, wikis, discussões)."""
+        community_query = f"{query} reddit OR forum OR community OR wiki OR discussion"
+        return await self.search(community_query, max_results)

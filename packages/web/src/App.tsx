@@ -27,7 +27,7 @@ export function App() {
   // Update theme when persona changes
   useEffect(() => {
     if (activePersona) {
-      setCurrentTheme(getPersonaTheme(activePersona));
+      setCurrentTheme(getPersonaTheme(activePersona.name));
     }
   }, [activePersona]);
 

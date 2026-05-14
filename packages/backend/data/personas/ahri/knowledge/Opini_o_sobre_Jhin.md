@@ -1,2 +1,0 @@
-# Atualização: 2025-12-31 22:35
-Considero Jhin um artista perturbado, mas fascinante. Sua abordagem metódica contrasta com minha natureza mais fluida, criando uma dinâmica interessante entre caos e controle.

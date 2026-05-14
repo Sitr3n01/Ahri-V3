@@ -9,6 +9,7 @@ from typing import Generator, Optional
 
 from src.config import get_settings
 from src.core.llm_clients import GeminiClient, OpenRouterClient, OllamaClient
+from src.core.model_capabilities import infer_model_capabilities, parse_capability_overrides, resolve_chat_model_alias
 from src.core.prompt_builder import build_system_prompt
 from src.core.save_tag_parser import extract_save_tags, clean_save_tags
 from src.services.vector_service import get_vector_service
@@ -50,6 +51,8 @@ class LLMService:
         self.settings = get_settings()
         self.mode = "FLASH"
         self._active_model_id = self.LEGACY_MODELS["FLASH"]
+        self._active_profile = infer_model_capabilities(self._active_model_id, "google_gemini")
+        self._current_supports_vision: bool = True  # Updated by set_mode()
         self.memory_notifications: list[str] = []
 
         # Clientes (1 key = 1 model)
@@ -89,48 +92,88 @@ class LLMService:
         logger.info(f"Initializing Ollama Client with model: {model_local}")
         self._ollama = OllamaClient(model_local)
 
+    def _refresh_active_profile(self, model_id: str, provider_hint: str) -> None:
+        self._active_profile = infer_model_capabilities(
+            model_id,
+            provider_hint,
+            vision_patterns=self.settings.ollama_vision_patterns,
+            overrides=parse_capability_overrides(self.settings.model_capabilities_overrides),
+        )
+        self._current_supports_vision = self._active_profile.supports_vision
+
     def set_mode(self, mode: str):
         """Troca o modo/modelo ativo.
 
         Aceita:
-        - Modos atuais: "FLASH", "LITE", "DEEPSEEK", "LOCAL"
+        - Aliases legados: "FLASH", "LITE", "DEEPSEEK", "LOCAL"
         - Backward compat: "PRO" → "FLASH", "GOOGLE" → "FLASH"
-        - Model IDs diretos: "gemini-2.5-flash", "gemini-3.1-flash-lite-preview", etc.
+        - Model IDs Google: "gemini-*" ou "gemma-*" → usa Gemini API
+        - Model IDs OpenRouter: qualquer string com "/" → usa OpenRouter
+        - Model IDs Ollama: qualquer outra string → usa Ollama local
         """
-        # Backward compatibility
+        s = self.settings
+
+        # Backward compat
         if mode in ("GOOGLE", "PRO"):
             mode = "FLASH"
 
-        # Modos conhecidos
+        _, resolved_provider_hint = resolve_chat_model_alias(mode, s)
+
+        # Aliases legados → resolvem para mode + model_id configurados
         if mode in self.LEGACY_MODELS:
             self.mode = mode
             if mode == "FLASH":
-                self._active_model_id = getattr(self.settings, "google_model_flash", "gemini-2.5-flash")
+                self._active_model_id = getattr(s, "google_model_flash", "gemini-2.5-flash")
+                self._current_supports_vision = True
             elif mode == "LITE":
-                self._active_model_id = getattr(self.settings, "google_model_lite", "gemini-3.1-flash-lite-preview")
+                self._active_model_id = getattr(s, "google_model_lite", "gemini-3.1-flash-lite-preview")
+                self._current_supports_vision = False  # Flash Lite não suporta visão
             elif mode == "LOCAL":
-                self._active_model_id = getattr(self.settings, "ollama_chat_model", "gpt-oss:20b")
+                self._active_model_id = getattr(s, "ollama_chat_model", "gpt-oss:20b")
+                self._current_supports_vision = False
+                self._ollama = OllamaClient(self._active_model_id)
+            elif mode == "DEEPSEEK":
+                self._active_model_id = getattr(s, "openrouter_model_name", self.LEGACY_MODELS["DEEPSEEK"])
+                self._current_supports_vision = False
             else:
                 self._active_model_id = self.LEGACY_MODELS[mode]
-                
+                self._current_supports_vision = False
+            self._refresh_active_profile(self._active_model_id, resolved_provider_hint)
             logger.info(f"Mode switched to {mode} ({self._active_model_id})")
             return
 
-        # Model ID direto (ex: "gemini-2.5-flash", "gemini-3.1-flash-lite-preview")
+        # Google model IDs ("gemini-*" ou "gemma-*") → Gemini API
         if mode.startswith("gemini-") or mode.startswith("gemma-"):
             self.mode = "FLASH"
             self._active_model_id = mode
-            # Atualiza client com o modelo solicitado
+            # Gemma 4 e Gemini Flash suportam visão; Flash Lite não
+            lite_id = getattr(s, "google_model_lite", "gemini-3.1-flash-lite-preview")
+            self._current_supports_vision = (mode != lite_id)
             client = self._gemini_flash or self._gemini_lite
             if client:
                 client.model_name = mode
-            logger.info(f"Mode switched to direct model: {mode}")
+            self._refresh_active_profile(self._active_model_id, resolved_provider_hint)
+            logger.info(f"Mode switched to Google model: {mode}")
             return
 
-        # Desconhecido — default para FLASH
-        logger.warning(f"Unknown mode '{mode}', defaulting to FLASH")
-        self.mode = "FLASH"
-        self._active_model_id = getattr(self.settings, "google_model_flash", "gemini-2.5-flash")
+        # OpenRouter (model ID contém "/")
+        if "/" in mode:
+            self.mode = "DEEPSEEK"
+            self._active_model_id = mode
+            self._current_supports_vision = False
+            if s.openrouter_api_key:
+                self._openrouter = OpenRouterClient(s.openrouter_api_key, mode)
+            self._refresh_active_profile(self._active_model_id, resolved_provider_hint)
+            logger.info(f"Mode switched to OpenRouter model: {mode}")
+            return
+
+        # Ollama dinâmico (qualquer outra string = nome de modelo local)
+        self.mode = "LOCAL"
+        self._active_model_id = mode
+        self._current_supports_vision = False
+        self._ollama = OllamaClient(mode)
+        self._refresh_active_profile(self._active_model_id, resolved_provider_hint)
+        logger.info(f"Mode switched to Ollama model: {mode}")
 
     def get_client_for_mode(self) -> Optional[GeminiClient | OpenRouterClient | OllamaClient]:
         """Retorna o cliente correto para o modo atual."""
@@ -147,7 +190,7 @@ class LLMService:
         return self._gemini_flash or self._gemini_lite
 
     def _is_gemini_mode(self) -> bool:
-        """Checa se o modo atual usa Gemini (Google)."""
+        """Checa se o modo atual usa Gemini API (inclui Gemma 4 cloud)."""
         return self.mode in ("FLASH", "LITE")
 
     def generate_response(
@@ -192,9 +235,9 @@ class LLMService:
         # Check se tem multimodal content
         has_multimodal = images or video or pdfs or uploaded_files
 
-        # Intercept: models sem suporte multimodal → transparente para Gemini Flash
-        # LITE (flash-lite), DEEPSEEK e LOCAL não suportam imagens nativamente
-        if has_multimodal and self.mode in ("LITE", "DEEPSEEK", "LOCAL"):
+        # Intercept: modelos sem suporte a visão → transparente para Gemini Flash
+        # _current_supports_vision é atualizado por set_mode() para cada modelo
+        if has_multimodal and not self._current_supports_vision:
             vision_key = self._vision_rotator.get_next_key(self.settings.vision_keys)
             if vision_key:
                 logger.info(f"[Vision Intercept] {self.mode} mode has multimodal content, routing to Gemini Flash")
@@ -213,7 +256,7 @@ class LLMService:
             return
 
         if self.mode == "DEEPSEEK" and self._openrouter:
-            yield from self._generate_openrouter(message, system_prompt, history, rag_context, stop_event)
+            yield from self._generate_openrouter(message, system_prompt, history, rag_context, reasoning_level, stop_event)
             return
 
         # Gemini (FLASH ou LITE)
@@ -350,6 +393,7 @@ class LLMService:
 
     def _generate_openrouter(
         self, message: str, system_prompt: str, history: list[dict], rag_context: str,
+        reasoning_level: str = "medium",
         stop_event: Optional[threading.Event] = None
     ) -> Generator[str, None, None]:
         """Gera com OpenRouter (DeepSeek)."""
@@ -364,7 +408,7 @@ class LLMService:
                 msgs.append({"role": role, "content": str(m.get("content", ""))})
             msgs.append({"role": "user", "content": message})
 
-            stream = self._openrouter.stream_chat(msgs)
+            stream = self._openrouter.stream_chat(msgs, reasoning_level=reasoning_level)
             for chunk in stream:
                 if stop_event and stop_event.is_set():
                     logger.info("[OpenRouter] Stream cancelled via stop_event")
@@ -406,7 +450,7 @@ class LLMService:
         Se model_name fornecido, configura o client com esse modelo.
         Cria instância dedicada para não interferir no chat.
         """
-        target_model = model_name or self.settings.agent_mode_api_model or self.LEGACY_MODELS["LITE"]
+        target_model = model_name or self.LEGACY_MODELS["LITE"]
 
         api_key = self.settings.gemini_primary_key or self.settings.gemini_fallback_key
         if api_key:
@@ -420,6 +464,19 @@ class LLMService:
 
 # Singleton
 _llm_service: Optional[LLMService] = None
+
+
+def create_llm_service(mode: Optional[str] = None) -> LLMService:
+    """Create an isolated LLM service for a single request.
+
+    Chat generation mutates the active model internally via set_mode(). Returning
+    a fresh service per request prevents concurrent chats from changing each
+    other's selected model.
+    """
+    service = LLMService()
+    if mode:
+        service.set_mode(mode)
+    return service
 
 
 def get_llm_service() -> LLMService:

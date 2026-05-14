@@ -174,6 +174,12 @@ class ModelCapabilities:
     supports_streaming: bool = True
     supports_json_mode: bool = True
     context_window: int = 128000
+    provider_family: str = ""
+    reasoning_control: str = "none"
+    reasoning_levels: list[str] = field(default_factory=list)
+    default_reasoning_level: str = "off"
+    reasoning_budget_tokens: dict[str, int] = field(default_factory=dict)
+    capability_source: str = "inferred"
     cost_per_1k_input: float = 0.0    # USD, 0 = free tier
     cost_per_1k_output: float = 0.0
 

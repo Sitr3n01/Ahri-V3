@@ -20,7 +20,7 @@ interface PersonaState {
 
 export const usePersonaStore = create<PersonaState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       // Initial state
       personas: [],
       activePersona: null,
@@ -30,12 +30,12 @@ export const usePersonaStore = create<PersonaState>()(
       loadPersonas: async () => {
         set({ isLoading: true });
         try {
-          const response = await api.getPersonas();
+          const response = await api.listPersonas();
           const personas = response.personas || [];
           set({ personas, isLoading: false });
 
           // Set active persona
-          const activePersona = personas.find(p => p.name === response.active);
+          const activePersona = personas.find((p: PersonaSummary) => p.name === response.active);
           if (activePersona) {
             set({ activePersona });
           } else if (personas.length > 0) {

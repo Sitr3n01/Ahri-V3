@@ -53,6 +53,8 @@ class PersonaSummary(BaseModel):
     display_name: str
     archetype: str = ""
     universe: str = ""
+    description: str = ""
+    tagline: str = ""
     theme: PersonaTheme = Field(default_factory=PersonaTheme)
 
 
@@ -97,10 +99,12 @@ class UpdatePersonaRequest(BaseModel):
 # Chat
 # =============================================================================
 class ChatMessageSchema(BaseModel):
+    id: Optional[int] = None
     role: str
     content: str
     images: list[str] = []
     timestamp: str = ""
+    created_at: Optional[datetime] = None
     meta: dict = {}
 
 
@@ -126,6 +130,7 @@ class ChatResponse(BaseModel):
     message: ChatMessageSchema
     memory_notifications: list[str] = []
     search_context: Optional[str] = None
+    search_used: bool = False
 
 
 # =============================================================================
@@ -381,6 +386,7 @@ class SettingsSchema(BaseModel):
     gemini_api_key_free: str = ""
     openrouter_api_key: str = ""
     openrouter_model_name: str = ""
+    model_capabilities_overrides: str = ""
     google_model_pro: str = "gemini-2.0-pro-exp-02-05"           # Modelo de alta performance
     google_model_flash: str = "gemini-2.5-flash"
     google_model_lite: str = "gemini-3.1-flash-lite-preview"
@@ -388,7 +394,13 @@ class SettingsSchema(BaseModel):
     google_model_search: str | None = None
     google_model_memory: str | None = None
     ollama_chat_model: str = "gpt-oss:20b"
-    
+    ollama_vision_patterns: str = "vision,llava,llama3.2-vision,llama4,gemma4"
+
+    # Gemma 4 (Google AI Studio)
+    gemma4_enabled: bool = True
+    gemma4_model_31b: str = "gemma-4-31b-it"
+    gemma4_model_26b: str = "gemma-4-26b-a4b"
+
     cse_api_key: str = ""
     cse_cx: str = ""
     
@@ -396,8 +408,6 @@ class SettingsSchema(BaseModel):
     spotipy_client_secret: str = ""
     spotipy_redirect_uri: str = ""
     
-    agent_mode_enabled: bool = True
-    agent_mode_orchestrator: str = ""
     ollama_base_url: str = ""
 
     google_api_key_vision_a: str = ""
@@ -413,23 +423,9 @@ class SettingsSchema(BaseModel):
     gh_token: str = ""
     gist_id: str = ""
 
-    # Agent Mode v2
-    agent_mode_rpm_limit: int = 15
-    agent_mode_tpm_limit: int = 250000
-    agent_mode_max_parallel: int = 10
-    agent_mode_local_model: str = "qwen3:8b"
-    agent_mode_api_model: str = "gemini-3.1-flash-lite-preview"
-
     # Compaction
     compaction_threshold: int = 30
     compaction_recent_window: int = 15
-
-    # Agent Mode API Keys (round-robin)
-    agent_api_key_1: str = ""
-    agent_api_key_2: str = ""
-    agent_api_key_3: str = ""
-    agent_api_key_4: str = ""
-    agent_api_key_5: str = ""
 
 
 
@@ -442,12 +438,26 @@ class UpdateSettingsRequest(BaseModel):
 # =============================================================================
 class AvailableModelSchema(BaseModel):
     id: str
+    actual_model_id: str = ""
     display_name: str
-    provider: str  # google_apikey, openrouter, ollama
+    provider: str   # "google_gemini" | "google_gemma" | "openrouter" | "ollama"
+    provider_family: str = ""
+    group: str = ""  # UI grouping label (same as provider by default)
+    is_local: bool = False
+    supports_vision: bool = False
+    supports_thinking: bool = False
+    supports_tools: bool = True
+    supports_json_mode: bool = True
+    supports_streaming: bool = True
     color: str = "#8B5CF6"
     description: str = ""
     input_token_limit: int = 0
     output_token_limit: int = 0
+    reasoning_control: str = "none"
+    reasoning_levels: list[str] = []
+    default_reasoning_level: str = "off"
+    reasoning_budget_tokens: dict[str, int] = {}
+    capability_source: str = "inferred"
 
 
 class GoogleModelInfo(BaseModel):

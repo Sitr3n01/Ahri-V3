@@ -7,6 +7,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 
+from src.core.time import utc_now
 from src.dependencies import AuthDep, DbDep
 from src.models.schemas import (
     UserProfileSchema, MemorySaveRequest, MemoryLearnRequest,
@@ -26,8 +27,6 @@ from src.services.memory_service import MemoryService
 from src.services.persona_service import get_active_persona
 from src.services.vector_service import get_vector_service
 from src.services.llm_service import LLMService
-
-from src.services.workers.narrative_memory_worker import NarrativeMemoryWorker
 
 logger = logging.getLogger("ahri.router.memory")
 
@@ -90,26 +89,12 @@ async def save_profile_endpoint(profile: UserProfileSchema, auth: AuthDep, db: D
     return {"status": "saved", "profile": profile}
 
 
-async def _run_synthesis_bg(db_url: str):
-    from src.models.database import async_session_factory
-    async with async_session_factory() as db:
-        try:
-            llm = LLMService(mode="PRO")  # Requires robust parsing
-            worker = NarrativeMemoryWorker(llm)
-            # using execution_id=0 for manual/background invokes outside agent mode
-            await worker.execute(db, execution_id=0, input_data={"limit_sessions": 10})
-        except Exception as e:
-            logger.error(f"Background synthesis failed: {e}")
-
 @router.post("/profile/synthesize")
-async def synthesize_profile_bg(auth: AuthDep, bg_tasks: BackgroundTasks):
-    from src.models.database import _engine
-    if not _engine:
-        raise HTTPException(status_code=500, detail="DB Engine not found")
-        
-    db_url = str(_engine.url)
-    bg_tasks.add_task(_run_synthesis_bg, db_url)
-    return {"status": "queued", "message": "Síntese de memória iniciada em background."}
+async def synthesize_profile_bg(auth: AuthDep):
+    raise HTTPException(
+        status_code=501,
+        detail="Síntese de memória narrativa será reimplementada no V4 Engine."
+    )
 
 
 # =============================================================================
@@ -594,8 +579,8 @@ def _item_schema(item: dict) -> SemanticMemoryItemSchema:
         tier=item["tier"],
         content=item["content"],
         source_session_id=item.get("source_session_id"),
-        created_at=datetime.fromisoformat(item["created_at"]) if item.get("created_at") else datetime.utcnow(),
-        last_reinforced=datetime.fromisoformat(item["last_reinforced"]) if item.get("last_reinforced") else datetime.utcnow(),
+        created_at=datetime.fromisoformat(item["created_at"]) if item.get("created_at") else utc_now(),
+        last_reinforced=datetime.fromisoformat(item["last_reinforced"]) if item.get("last_reinforced") else utc_now(),
         decay_date=datetime.fromisoformat(item["decay_date"]) if item.get("decay_date") else None,
         is_flagged=item.get("is_flagged", False),
         conflict_note=item.get("conflict_note", ""),

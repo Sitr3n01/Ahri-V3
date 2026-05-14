@@ -13,6 +13,10 @@ import asyncio
 from typing import Optional
 from collections import defaultdict
 
+import httpx
+
+from src.core.model_capabilities import infer_model_capabilities, parse_capability_overrides
+
 from .types import ModelInfo, ModelCapabilities, LLMResponse
 from .providers.base import LLMProvider
 from .providers.gemini_provider import GeminiProvider
@@ -21,6 +25,32 @@ from .providers.openrouter_provider import OpenRouterProvider
 from .errors import ProviderError, RateLimitError
 
 logger = logging.getLogger("ahri.engine.registry")
+
+
+def _engine_capabilities(model_id: str, provider_hint: str, settings=None, **kwargs) -> ModelCapabilities:
+    overrides = parse_capability_overrides(getattr(settings, "model_capabilities_overrides", "")) if settings else {}
+    profile = infer_model_capabilities(
+        model_id,
+        provider_hint,
+        vision_patterns=getattr(settings, "ollama_vision_patterns", ""),
+        overrides=overrides,
+        **kwargs,
+    )
+    return ModelCapabilities(
+        max_tokens=profile.output_token_limit,
+        supports_tools=profile.supports_tools,
+        supports_vision=profile.supports_vision,
+        supports_thinking=profile.supports_thinking,
+        supports_streaming=profile.supports_streaming,
+        supports_json_mode=profile.supports_json_mode,
+        context_window=profile.input_token_limit,
+        provider_family=profile.provider_family,
+        reasoning_control=profile.reasoning.control,
+        reasoning_levels=list(profile.reasoning.levels),
+        default_reasoning_level=profile.reasoning.default_level,
+        reasoning_budget_tokens=profile.reasoning.budget_tokens,
+        capability_source=profile.capability_source,
+    )
 
 
 class ModelRegistry:
@@ -151,6 +181,37 @@ class ModelRegistry:
                 )
             raise
 
+    async def refresh_ollama_models(self, base_url: str = "http://localhost:11434"):
+        """Query Ollama /api/tags and register any new models dynamically.
+
+        Existing Ollama models are kept; newly discovered ones are added.
+        Safe to call at any time (thread-safe via async lock).
+        """
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                resp = await client.get(f"{base_url.rstrip('/')}/api/tags")
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception as e:
+            logger.debug(f"Ollama not reachable for refresh: {e}")
+            return
+
+        async with self._lock:
+            for m in data.get("models", []):
+                name: str = m.get("name", "")
+                if not name or name in self._models:
+                    continue
+                details = m.get("details", {})
+                param_size = details.get("parameter_size", "")
+                self._models[name] = ModelInfo(
+                    id=name,
+                    provider="ollama",
+                    display_name=f"{name} ({param_size})" if param_size else name,
+                    aliases=[],
+                    capabilities=_engine_capabilities(name, "ollama"),
+                )
+            logger.info(f"Ollama refresh: {len(data.get('models', []))} models found")
+
     @property
     def available_models(self) -> list[ModelInfo]:
         return list(self._models.values())
@@ -185,10 +246,7 @@ def create_model_registry(settings) -> ModelRegistry:
         provider="gemini",
         display_name="Gemini Flash Lite",
         aliases=["fast", "lite", "agent", "LITE", "gemini-flash-lite"],
-        capabilities=ModelCapabilities(
-            max_tokens=8192, supports_tools=True, supports_vision=False,
-            supports_thinking=False, context_window=262144,
-        ),
+        capabilities=_engine_capabilities(settings.google_model_lite, "google_gemini", settings),
         fallback_to=settings.google_model_flash,
     ))
 
@@ -198,10 +256,7 @@ def create_model_registry(settings) -> ModelRegistry:
         provider="gemini",
         display_name="Gemini Flash",
         aliases=["default", "balanced", "flash", "FLASH", "GOOGLE"],
-        capabilities=ModelCapabilities(
-            max_tokens=65536, supports_tools=True, supports_vision=True,
-            supports_thinking=True, context_window=1048576,
-        ),
+        capabilities=_engine_capabilities(settings.google_model_flash, "google_gemini", settings),
         fallback_to=settings.google_model_lite,
     ))
 
@@ -211,23 +266,36 @@ def create_model_registry(settings) -> ModelRegistry:
         provider="gemini",
         display_name="Gemini Pro",
         aliases=["best", "pro", "smart", "PRO"],
-        capabilities=ModelCapabilities(
-            max_tokens=65536, supports_tools=True, supports_vision=True,
-            supports_thinking=True, context_window=1048576,
-        ),
+        capabilities=_engine_capabilities(settings.google_model_pro, "google_gemini", settings),
         fallback_to=settings.google_model_flash,
     ))
 
-    # Ollama local model
+    # Gemma 4 31B via Google AI Studio (same Gemini API, different model ID)
+    if getattr(settings, "gemma4_enabled", True) and settings.gemini_primary_key:
+        registry.register_model(ModelInfo(
+            id=getattr(settings, "gemma4_model_31b", "gemma-4-31b-it"),
+            provider="gemini",
+            display_name="Gemma 4 31B",
+            aliases=["gemma4", "gemma4-31b"],
+            capabilities=_engine_capabilities(getattr(settings, "gemma4_model_31b", "gemma-4-31b-it"), "google_gemma", settings),
+            fallback_to=settings.google_model_flash,
+        ))
+        registry.register_model(ModelInfo(
+            id=getattr(settings, "gemma4_model_26b", "gemma-4-26b-a4b"),
+            provider="gemini",
+            display_name="Gemma 4 26B (MoE)",
+            aliases=["gemma4-26b", "gemma4-moe"],
+            capabilities=_engine_capabilities(getattr(settings, "gemma4_model_26b", "gemma-4-26b-a4b"), "google_gemma", settings),
+            fallback_to=settings.google_model_flash,
+        ))
+
+    # Ollama local model (default configured model — dynamic models added via refresh_ollama_models)
     registry.register_model(ModelInfo(
         id=settings.ollama_chat_model,
         provider="ollama",
         display_name="Local (Ollama)",
         aliases=["local", "LOCAL", "ollama", "qwen-3.5-local"],
-        capabilities=ModelCapabilities(
-            max_tokens=8192, supports_tools=True, supports_vision=False,
-            supports_thinking=True, context_window=32768,
-        ),
+        capabilities=_engine_capabilities(settings.ollama_chat_model, "ollama", settings),
     ))
 
     # DeepSeek via OpenRouter (optional)
@@ -237,23 +305,19 @@ def create_model_registry(settings) -> ModelRegistry:
             provider="openrouter",
             display_name="DeepSeek R1 (OpenRouter)",
             aliases=["deepseek", "DEEPSEEK", "reasoning"],
-            capabilities=ModelCapabilities(
-                max_tokens=8192, supports_tools=True, supports_thinking=True,
-                context_window=128000,
-            ),
+            capabilities=_engine_capabilities(settings.openrouter_model_name, "openrouter", settings),
             fallback_to=settings.google_model_flash,
         ))
         registry.add_api_key("openrouter", settings.openrouter_api_key)
 
     # ── Register API keys (round-robin) ──
-    for key in settings.agent_api_keys:
-        registry.add_api_key("gemini", key)
-
-    # Add primary keys too
-    if settings.gemini_api_key_paid:
-        registry.add_api_key("gemini", settings.gemini_api_key_paid)
-    if settings.gemini_api_key_free:
-        registry.add_api_key("gemini", settings.gemini_api_key_free)
+    for key in [
+        settings.gemini_api_key_paid,
+        settings.gemini_api_key_free,
+        settings.google_ai_studio_api_key,
+    ]:
+        if key:
+            registry.add_api_key("gemini", key)
 
     logger.info(
         f"ModelRegistry initialized: {len(registry.available_models)} models, "

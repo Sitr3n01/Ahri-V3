@@ -11,6 +11,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPExce
 from pydantic import BaseModel
 
 from ..config import get_settings, Settings
+from ..core.time import utc_now
 from ..dependencies import AuthDep, DbDep
 from ..models.database import AsyncSession
 
@@ -77,7 +78,6 @@ async def execute_task(
 
     # Persist execution record to DB
     if execution_id:
-        from datetime import datetime
         from ..models.database import EngineExecution
 
         duration_ms = int((time.time() - start_time) * 1000)
@@ -94,7 +94,7 @@ async def execute_task(
             final_response=final_response,
             error=error_msg,
             duration_ms=duration_ms,
-            completed_at=datetime.utcnow(),
+            completed_at=utc_now(),
         )
         db.add(db_record)
         await db.commit()

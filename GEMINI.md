@@ -1,6 +1,10 @@
 # Ahri V3 - Context for Gemini/OpenCode
 **Version:** 3.0.1 | **Updated:** 2026-02-11 | **Status:** Production Ready
 
+> Agent rule source: read `AGENTS.md` first. This file adds model-specific
+> context, but organizational, scalability, hygiene, and quality-gate
+> requirements live in `AGENTS.md`.
+
 ---
 
 ## Project Summary

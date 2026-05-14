@@ -13,6 +13,7 @@ from google.genai import types
 from openai import OpenAI
 
 from src.config import get_settings
+from src.core.model_capabilities import gemini_thinking_config_payload, openrouter_reasoning_extra
 
 logger = logging.getLogger("ahri.llm")
 
@@ -44,18 +45,8 @@ class GeminiClient:
         - Gemini 3.x: usa thinking_level (string: low/medium/high)
         - Gemini 2.5: usa thinking_budget (int: 1024/8192/24576)
         """
-        if not reasoning_level or reasoning_level == "off":
-            return None
-
-        model_lower = self.model_name.lower()
-        is_3x = any(v in model_lower for v in ["3.1", "3.0", "3-flash", "3-pro"])
-
-        if is_3x:
-            return types.ThinkingConfig(thinking_level=reasoning_level)
-        else:
-            budget_map = {"low": 1024, "medium": 8192, "high": 24576}
-            budget = budget_map.get(reasoning_level, 8192)
-            return types.ThinkingConfig(thinking_budget=budget)
+        payload = gemini_thinking_config_payload(self.model_name, reasoning_level)
+        return types.ThinkingConfig(**payload) if payload else None
 
     def create_chat_and_send_stream(
         self,
@@ -238,13 +229,17 @@ class OpenRouterClient:
             api_key=api_key,
         )
 
-    def stream_chat(self, messages: list[dict]):
+    def stream_chat(self, messages: list[dict], reasoning_level: str = "medium"):
         """Gera resposta em streaming."""
-        return self.client.chat.completions.create(
-            model=self.model_name,
-            messages=messages,
-            stream=True,
-        )
+        kwargs: dict[str, object] = {
+            "model": self.model_name,
+            "messages": messages,
+            "stream": True,
+        }
+        extra_body = openrouter_reasoning_extra(self.model_name, reasoning_level)
+        if extra_body:
+            kwargs["extra_body"] = extra_body
+        return self.client.chat.completions.create(**kwargs)
 
 
 class OllamaClient:

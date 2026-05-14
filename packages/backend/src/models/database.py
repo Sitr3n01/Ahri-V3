@@ -2,11 +2,11 @@
 SQLAlchemy models e engine SQLite.
 Substitui os arquivos JSON (user_profile.json, memory.json, history/*.json, etc).
 """
-from datetime import datetime
-
 from sqlalchemy import Column, Integer, String, Text, Float, Boolean, DateTime, JSON, ForeignKey, Index
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, relationship
+
+from src.core.time import utc_now
 
 
 class Base(DeclarativeBase):
@@ -41,7 +41,7 @@ class UserProfile(Base):
     active_quests = Column(JSON, default=dict)
     session_log = Column(JSON, default=list)
 
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
 
 # =============================================================================
@@ -53,7 +53,7 @@ class SocialGraphEntry(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     platform = Column(String(50), nullable=False)    # spotify, instagram, twitter
     data = Column(JSON, default=dict)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
 
 # =============================================================================
@@ -68,7 +68,7 @@ class PersonaMemory(Base):
     session_log = Column(JSON, default=list)
     session_log_detailed = Column(JSON, default=list)
     last_session_buffer = Column(JSON, default=list)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
 
 # =============================================================================
@@ -83,8 +83,8 @@ class ChatSession(Base):
     original_filename = Column(String(200), default="")  # Para referência durante migração
     compacted_summary = Column(Text, default="")          # Summary of compacted older messages
     compacted_up_to = Column(Integer, default=0)           # order_index up to which messages were compacted
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
 
@@ -103,7 +103,7 @@ class ChatMessage(Base):
     timestamp = Column(String(20), default="")        # HH:MM:SS format from original
     order_index = Column(Integer, default=0)
     meta = Column(JSON, default=dict)                 # auto_generated, model_used, etc.
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
     session = relationship("ChatSession", back_populates="messages")
 
@@ -118,7 +118,7 @@ class RagIngestionTracker(Base):
     persona_name = Column(String(50), nullable=False, index=True)
     file_key = Column(String(300), nullable=False)   # e.g., "static_lore/lore.md"
     last_modified = Column(Float, default=0.0)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
 
 # =============================================================================
@@ -141,7 +141,7 @@ class EpisodicMemory(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     persona_name = Column(String(50), nullable=False, index=True)
-    date = Column(DateTime, default=datetime.utcnow)
+    date = Column(DateTime, default=utc_now)
     topics = Column(JSON, default=list)              # ["japanese", "coding", "personal"]
     emotional_tone = Column(String(50), default="")  # "focused", "playful", "melancholic"
     summary = Column(Text, default="")
@@ -172,7 +172,7 @@ class UserPreferences(Base):
     topics_to_avoid = Column(Text, default="")
     persona_style = Column(Text, default="")
 
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
 
 class SemanticMemoryTier(Base):
@@ -192,8 +192,8 @@ class SemanticMemoryTier(Base):
         nullable=True
     )
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    last_reinforced = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    last_reinforced = Column(DateTime, default=utc_now, nullable=False)
 
     decay_date = Column(DateTime, nullable=True)
     # Set when this item should be re-evaluated for tier demotion
@@ -235,7 +235,7 @@ class EngineExecution(Base):
     error = Column(Text, nullable=True)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
     completed_at = Column(DateTime, nullable=True)
     duration_ms = Column(Integer, nullable=True)
 
@@ -255,7 +255,7 @@ class EngineToolUse(Base):
     error = Column(Text, nullable=True)
     duration_ms = Column(Integer, default=0)
     iteration = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
     # Relationship
     execution = relationship("EngineExecution", back_populates="tool_uses")
@@ -270,7 +270,7 @@ class EnginePlugin(Base):
     version = Column(String, nullable=False)
     description = Column(Text, default="")
     enabled = Column(Boolean, default=True)
-    installed_at = Column(DateTime, default=datetime.utcnow)
+    installed_at = Column(DateTime, default=utc_now)
     config = Column(JSON, default={})
 
 

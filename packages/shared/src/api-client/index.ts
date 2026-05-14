@@ -4,7 +4,7 @@
  */
 
 import type { TokenResponse, HealthResponse } from '../types/api.js';
-import type { PersonaListResponse, PersonaDetail } from '../types/persona.js';
+import type { PersonaListResponse, PersonaDetail, UpdatePersonaRequest } from '../types/persona.js';
 import type { ChatRequest, ChatResponse, SessionSummary, SessionDetail } from '../types/chat.js';
 import type {
   UserProfile, SpotifyContext, AutoProfile, AutoProfilePatch,
@@ -16,6 +16,7 @@ import type {
   MemoryTier, AddSemanticFactRequest, MigrateLegacyResponse,
 } from '../types/memory.js';
 import type { AvailableModel, GoogleModelCheckResponse } from '../types/llm.js';
+import type { SettingsConfig, UpdateSettingsRequest } from '../types/settings.js';
 
 export interface AhriClientConfig {
   baseUrl: string;
@@ -194,7 +195,7 @@ export class AhriApiClient {
     return this.request<{ active: string }>('POST', `/personas/${encodeURIComponent(name)}/activate`);
   }
 
-  async updatePersona(name: string, data: Record<string, any>): Promise<PersonaDetail> {
+  async updatePersona(name: string, data: UpdatePersonaRequest): Promise<PersonaDetail> {
     return this.request<PersonaDetail>('PUT', `/personas/${encodeURIComponent(name)}`, data);
   }
 
@@ -401,11 +402,11 @@ export class AhriApiClient {
   // Settings
   // =========================================================================
 
-  async getSettings(): Promise<any> {
-    return this.request<any>('GET', '/settings');
+  async getSettings(): Promise<SettingsConfig> {
+    return this.request<SettingsConfig>('GET', '/settings');
   }
 
-  async updateSettings(settings: Record<string, any>): Promise<{ status: string }> {
+  async updateSettings(settings: UpdateSettingsRequest): Promise<{ status: string }> {
     return this.request<{ status: string }>('POST', '/settings', { settings });
   }
 
@@ -415,6 +416,10 @@ export class AhriApiClient {
 
   async getAvailableModels(): Promise<AvailableModel[]> {
     return this.request<AvailableModel[]>('GET', '/settings/models/available');
+  }
+
+  async refreshOllamaModels(): Promise<AvailableModel[]> {
+    return this.request<AvailableModel[]>('POST', '/settings/models/ollama/refresh');
   }
 
   async checkGoogleModels(apiKey?: string): Promise<GoogleModelCheckResponse> {

@@ -47,14 +47,12 @@ export function ChatView() {
     if ((!input.trim() && selectedImages.length === 0) || isStreaming) return;
 
     const messageText = input.trim();
-    const images = selectedImages;
-
     // Clear input immediately
     setInput('');
     setSelectedImages([]);
 
     // Send message
-    await sendMessage(messageText, images);
+    await sendMessage(messageText, selectedImages);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -94,8 +92,8 @@ export function ChatView() {
           </div>
         ) : (
           <>
-            {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} />
+            {messages.map((msg, index) => (
+              <MessageBubble key={msg.id ?? `${msg.role}-${msg.timestamp}-${index}`} message={msg} />
             ))}
             {isStreaming && (
               <div className="flex items-center gap-2 text-white/50 text-sm">

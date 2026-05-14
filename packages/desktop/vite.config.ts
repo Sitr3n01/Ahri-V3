@@ -22,6 +22,16 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'ui-vendor': ['zustand', 'lucide-react'],
+          'markdown-vendor': ['react-markdown', 'remark-gfm'],
+          'highlight-vendor': ['react-syntax-highlighter'],
+        },
+      },
+    },
   },
   // Copia assets para o build
   publicDir: path.resolve(__dirname, '../../data/assets'),
