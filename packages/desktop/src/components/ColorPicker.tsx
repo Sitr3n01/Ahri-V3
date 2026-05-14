@@ -75,10 +75,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({ color, onChange, onClo
 
   // Sync internal state if external color changes
   useEffect(() => {
-    const currentHex = hsvToHex(hsv.h, hsv.s, hsv.v);
-    if (currentHex !== color.toUpperCase()) {
-      setHsv(hexToHsv(color));
-    }
+    setHsv(hexToHsv(color));
   }, [color]);
 
   // Determine positioning (top or bottom)

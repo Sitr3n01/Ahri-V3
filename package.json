@@ -7,16 +7,38 @@
   ],
   "scripts": {
     "dev": "turbo run dev --filter=@ahri/desktop",
+    "dev:all": "concurrently -n backend,desktop -c cyan,magenta \"npm run dev:backend\" \"npm run dev:desktop\"",
     "dev:backend": "cd packages/backend && uvicorn src.main:app --reload --port 8742",
     "dev:desktop": "turbo run dev --filter=@ahri/desktop",
     "dev:web": "turbo run dev --filter=@ahri/web",
     "build": "turbo run build",
     "lint": "turbo run lint",
-    "type-check": "turbo run type-check"
+    "quality": "node scripts/quality-gate.mjs",
+    "quality:quick": "node scripts/quality-gate.mjs --quick",
+    "quality:strict": "node scripts/quality-gate.mjs --strict-size",
+    "test": "turbo run test",
+    "type-check": "turbo run type-check",
+    "quality:report": "node scripts/quality/quality-gate.js report",
+    "quality:check": "node scripts/quality/quality-gate.js check",
+    "quality:baseline": "node scripts/quality/quality-gate.js baseline",
+    "quality:comment": "node scripts/quality/render-pr-comment.js",
+    "quality:validate": "node scripts/quality/validate-config.js",
+    "quality:explainer-context": "node scripts/quality/run-explainer-context.js",
+    "audit:report": "node scripts/quality/run-audit-report.js",
+    "complexity:ci": "node scripts/quality/run-complexity-report.js",
+    "test:coverage:ci": "turbo run test -- --coverage --reporter=json",
+    "duplication:ci": "jscpd --config .jscpd.json --noTips packages/desktop/src packages/web/src packages/shared/src"
   },
   "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.59.2",
+    "@typescript-eslint/parser": "^8.59.2",
+    "concurrently": "^9.2.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "jscpd": "^4.2.0",
+    "jsdom": "^29.1.1",
     "turbo": "^2.3.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.5"
   },
   "packageManager": "npm@10.9.0",
   "engines": {

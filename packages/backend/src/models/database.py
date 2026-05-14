@@ -2,11 +2,11 @@
 SQLAlchemy models e engine SQLite.
 Substitui os arquivos JSON (user_profile.json, memory.json, history/*.json, etc).
 """
-from datetime import datetime
-
 from sqlalchemy import Column, Integer, String, Text, Float, Boolean, DateTime, JSON, ForeignKey, Index
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, relationship
+
+from src.core.time import utc_now
 
 
 class Base(DeclarativeBase):
@@ -41,7 +41,7 @@ class UserProfile(Base):
     active_quests = Column(JSON, default=dict)
     session_log = Column(JSON, default=list)
 
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
 
 # =============================================================================
@@ -53,7 +53,7 @@ class SocialGraphEntry(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     platform = Column(String(50), nullable=False)    # spotify, instagram, twitter
     data = Column(JSON, default=dict)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
 
 # =============================================================================
@@ -68,7 +68,7 @@ class PersonaMemory(Base):
     session_log = Column(JSON, default=list)
     session_log_detailed = Column(JSON, default=list)
     last_session_buffer = Column(JSON, default=list)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
 
 # =============================================================================
@@ -83,8 +83,8 @@ class ChatSession(Base):
     original_filename = Column(String(200), default="")  # Para referência durante migração
     compacted_summary = Column(Text, default="")          # Summary of compacted older messages
     compacted_up_to = Column(Integer, default=0)           # order_index up to which messages were compacted
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
 
@@ -103,7 +103,7 @@ class ChatMessage(Base):
     timestamp = Column(String(20), default="")        # HH:MM:SS format from original
     order_index = Column(Integer, default=0)
     meta = Column(JSON, default=dict)                 # auto_generated, model_used, etc.
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
     session = relationship("ChatSession", back_populates="messages")
 
@@ -118,7 +118,7 @@ class RagIngestionTracker(Base):
     persona_name = Column(String(50), nullable=False, index=True)
     file_key = Column(String(300), nullable=False)   # e.g., "static_lore/lore.md"
     last_modified = Column(Float, default=0.0)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
 
 # =============================================================================
@@ -141,105 +141,12 @@ class EpisodicMemory(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     persona_name = Column(String(50), nullable=False, index=True)
-    date = Column(DateTime, default=datetime.utcnow)
+    date = Column(DateTime, default=utc_now)
     topics = Column(JSON, default=list)              # ["japanese", "coding", "personal"]
     emotional_tone = Column(String(50), default="")  # "focused", "playful", "melancholic"
     summary = Column(Text, default="")
     importance = Column(Integer, default=5)           # 1-10 scale
     outcomes = Column(JSON, default=list)             # ["learned hiragana T-row", "fixed bug"]
-
-
-# =============================================================================
-# Agent Tasks (NOVA - Tarefas do agente)
-# =============================================================================
-class AgentTask(Base):
-    __tablename__ = "agent_tasks"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    capability = Column(String(50), nullable=False)  # file_read, shell_execute, etc.
-    parameters = Column(JSON, default=dict)
-    permission_level = Column(String(20), default="SAFE")  # SAFE, CONFIRM, BLOCKED
-    status = Column(String(20), default="pending")   # pending, approved, running, completed, failed
-    result = Column(Text, default="")
-    error = Column(Text, default="")
-    execution_id = Column(Integer, ForeignKey("agent_executions.id", ondelete="SET NULL"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    completed_at = Column(DateTime, nullable=True)
-
-
-# =============================================================================
-# Agent Mode - Sessions (groups related executions)
-# =============================================================================
-class AgentSession(Base):
-    __tablename__ = "agent_sessions"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    title = Column(String(200), default="")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    executions = relationship("AgentExecution", back_populates="session", cascade="all, delete-orphan")
-
-
-# =============================================================================
-# Agent Mode - Orchestrated Executions
-# =============================================================================
-class AgentExecution(Base):
-    __tablename__ = "agent_executions"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    agent_session_id = Column(Integer, ForeignKey("agent_sessions.id", ondelete="SET NULL"), nullable=True)
-    goal = Column(Text, nullable=False)                  # User's task description
-    orchestrator_model = Column(String(100), nullable=False)  # "gemini-2.5-flash", "gemini-3.1-flash-lite"
-    status = Column(String(20), default="planning")      # planning, deliberating, running, completed, failed
-    plan = Column(JSON, default=dict)                    # Orchestrator's step breakdown
-    result = Column(Text, default="")                    # Final synthesized output
-    error = Column(Text, default="")
-    images = Column(JSON, default=list)                  # Base64 encoded images for context
-    permission_mode = Column(String(20), default="auto")  # auto, plan_first, supervised
-    replan_count = Column(Integer, default=0, server_default="0")  # Number of replans triggered
-    original_plan = Column(JSON, nullable=True)           # Plan before revision (if replanned)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    completed_at = Column(DateTime, nullable=True)
-
-    session = relationship("AgentSession", back_populates="executions")
-    worker_tasks = relationship("AgentWorkerTask", back_populates="execution", cascade="all, delete-orphan")
-
-
-class AgentWorkerTask(Base):
-    __tablename__ = "agent_worker_tasks"
-    __table_args__ = (
-        Index("ix_worker_tasks_execution_id", "execution_id"),
-    )
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    execution_id = Column(Integer, ForeignKey("agent_executions.id", ondelete="CASCADE"), nullable=False)
-    worker_type = Column(String(50), nullable=False)     # RAG, Code, Web, Memory, Vision, Shell, Browser, Router
-    model = Column(String(100), nullable=False)          # "gemini-3.1-flash-lite", etc.
-    input_data = Column(JSON, default=dict)              # Worker prompt + parameters
-    output_data = Column(JSON, default=dict)             # Worker's structured result
-    tokens_used = Column(Integer, default=0)             # For TPM tracking
-    duration_ms = Column(Integer, default=0)
-    status = Column(String(20), default="pending")       # pending, running, completed, failed
-    error = Column(Text, default="")
-    retry_count = Column(Integer, default=0, server_default="0")  # Self-correction retry count
-    reflexion_notes = Column(JSON, default=list)          # Reflexion notes from self-correction
-    created_at = Column(DateTime, default=datetime.utcnow)
-    completed_at = Column(DateTime, nullable=True)
-
-    execution = relationship("AgentExecution", back_populates="worker_tasks")
-
-
-class TPMQuota(Base):
-    __tablename__ = "tpm_quotas"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    api_key_hash = Column(String(64), nullable=False)    # SHA256 hash of API key
-    provider = Column(String(50), nullable=False)        # google_gemini, deepinfra, ollama
-    model = Column(String(100), nullable=False)          # gemini-3.1-flash-lite, gemini-2.5-flash, etc.
-    tokens_used = Column(Integer, default=0)
-    window_start = Column(DateTime, nullable=False)
-    window_end = Column(DateTime, nullable=False)
 
 
 # =============================================================================
@@ -265,7 +172,7 @@ class UserPreferences(Base):
     topics_to_avoid = Column(Text, default="")
     persona_style = Column(Text, default="")
 
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
 
 class SemanticMemoryTier(Base):
@@ -285,8 +192,8 @@ class SemanticMemoryTier(Base):
         nullable=True
     )
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    last_reinforced = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    last_reinforced = Column(DateTime, default=utc_now, nullable=False)
 
     decay_date = Column(DateTime, nullable=True)
     # Set when this item should be re-evaluated for tier demotion
@@ -328,7 +235,7 @@ class EngineExecution(Base):
     error = Column(Text, nullable=True)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
     completed_at = Column(DateTime, nullable=True)
     duration_ms = Column(Integer, nullable=True)
 
@@ -348,7 +255,7 @@ class EngineToolUse(Base):
     error = Column(Text, nullable=True)
     duration_ms = Column(Integer, default=0)
     iteration = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
     # Relationship
     execution = relationship("EngineExecution", back_populates="tool_uses")
@@ -363,7 +270,7 @@ class EnginePlugin(Base):
     version = Column(String, nullable=False)
     description = Column(Text, default="")
     enabled = Column(Boolean, default=True)
-    installed_at = Column(DateTime, default=datetime.utcnow)
+    installed_at = Column(DateTime, default=utc_now)
     config = Column(JSON, default={})
 
 

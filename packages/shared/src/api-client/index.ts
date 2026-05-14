@@ -4,10 +4,8 @@
  */
 
 import type { TokenResponse, HealthResponse } from '../types/api.js';
-import type { PersonaListResponse, PersonaDetail } from '../types/persona.js';
+import type { PersonaListResponse, PersonaDetail, UpdatePersonaRequest } from '../types/persona.js';
 import type { ChatRequest, ChatResponse, SessionSummary, SessionDetail } from '../types/chat.js';
-import type { AgentTask } from '../types/agent.js';
-import type { AgentExecution, AgentSession, AgentWorkerTask, AgentModeExecuteRequest } from '../types/agent-mode.js';
 import type {
   UserProfile, SpotifyContext, AutoProfile, AutoProfilePatch,
   RagFileInfo, RagStats, RagMemoryItem, SocialGraphPlatform,
@@ -18,6 +16,7 @@ import type {
   MemoryTier, AddSemanticFactRequest, MigrateLegacyResponse,
 } from '../types/memory.js';
 import type { AvailableModel, GoogleModelCheckResponse } from '../types/llm.js';
+import type { SettingsConfig, UpdateSettingsRequest } from '../types/settings.js';
 
 export interface AhriClientConfig {
   baseUrl: string;
@@ -196,7 +195,7 @@ export class AhriApiClient {
     return this.request<{ active: string }>('POST', `/personas/${encodeURIComponent(name)}/activate`);
   }
 
-  async updatePersona(name: string, data: Record<string, any>): Promise<PersonaDetail> {
+  async updatePersona(name: string, data: UpdatePersonaRequest): Promise<PersonaDetail> {
     return this.request<PersonaDetail>('PUT', `/personas/${encodeURIComponent(name)}`, data);
   }
 
@@ -380,22 +379,6 @@ export class AhriApiClient {
   }
 
   // =========================================================================
-  // Agent
-  // =========================================================================
-
-  async executeAgentTask(capability: string, parameters: Record<string, unknown> = {}): Promise<AgentTask> {
-    return this.request<AgentTask>('POST', '/agent/execute', { capability, parameters });
-  }
-
-  async approveAgentTask(taskId: number): Promise<AgentTask> {
-    return this.request<AgentTask>('POST', `/agent/${taskId}/approve`);
-  }
-
-  async getAgentTaskStatus(taskId: number): Promise<AgentTask> {
-    return this.request<AgentTask>('GET', `/agent/${taskId}/status`);
-  }
-
-  // =========================================================================
   // Search
   // =========================================================================
 
@@ -416,85 +399,14 @@ export class AhriApiClient {
   }
 
   // =========================================================================
-  // Agent Mode
-  // =========================================================================
-
-  async executeAgentMode(
-    goal: string,
-    orchestratorModel = 'gemini-3.1-flash-lite-preview',
-    options?: {
-      reasoning_level?: string;
-      enable_thinking?: boolean;
-      internet_search_enabled?: boolean;
-      images?: string[];
-      permission_mode?: string;
-      agent_session_id?: number;
-    }
-  ): Promise<AgentExecution> {
-    return this.request<AgentExecution>('POST', '/agent-mode/execute', {
-      goal,
-      orchestrator_model: orchestratorModel,
-      ...(options || {}),
-    });
-  }
-
-  async approveExecution(executionId: number): Promise<AgentExecution> {
-    return this.request<AgentExecution>('POST', `/agent-mode/${executionId}/approve`);
-  }
-
-  async cancelAgentMode(executionId: number): Promise<AgentExecution> {
-    return this.request<AgentExecution>('POST', `/agent-mode/${executionId}/cancel`);
-  }
-
-  async rejectExecution(executionId: number): Promise<AgentExecution> {
-    return this.request<AgentExecution>('POST', `/agent-mode/${executionId}/reject`);
-  }
-
-  async approveWorkerTask(taskId: number): Promise<AgentWorkerTask> {
-    return this.request<AgentWorkerTask>('POST', `/agent-mode/worker/${taskId}/approve`);
-  }
-
-  async skipWorkerTask(taskId: number): Promise<AgentWorkerTask> {
-    return this.request<AgentWorkerTask>('POST', `/agent-mode/worker/${taskId}/skip`);
-  }
-
-  async getAgentModeStatus(executionId: number): Promise<AgentExecution> {
-    return this.request<AgentExecution>('GET', `/agent-mode/${executionId}/status`);
-  }
-
-  async getAgentModeWorkers(executionId: number): Promise<AgentWorkerTask[]> {
-    return this.request<AgentWorkerTask[]>('GET', `/agent-mode/${executionId}/workers`);
-  }
-
-  // =========================================================================
-  // Agent Sessions
-  // =========================================================================
-
-  async getAgentSessions(): Promise<AgentSession[]> {
-    return this.request<AgentSession[]>('GET', '/agent-mode/sessions/list');
-  }
-
-  async createAgentSession(): Promise<AgentSession> {
-    return this.request<AgentSession>('POST', '/agent-mode/sessions/create');
-  }
-
-  async getAgentSession(sessionId: number): Promise<AgentSession> {
-    return this.request<AgentSession>('GET', `/agent-mode/sessions/${sessionId}`);
-  }
-
-  async deleteAgentSession(sessionId: number): Promise<void> {
-    return this.request<void>('DELETE', `/agent-mode/sessions/${sessionId}`);
-  }
-
-  // =========================================================================
   // Settings
   // =========================================================================
 
-  async getSettings(): Promise<any> {
-    return this.request<any>('GET', '/settings');
+  async getSettings(): Promise<SettingsConfig> {
+    return this.request<SettingsConfig>('GET', '/settings');
   }
 
-  async updateSettings(settings: Record<string, any>): Promise<{ status: string }> {
+  async updateSettings(settings: UpdateSettingsRequest): Promise<{ status: string }> {
     return this.request<{ status: string }>('POST', '/settings', { settings });
   }
 
@@ -504,6 +416,10 @@ export class AhriApiClient {
 
   async getAvailableModels(): Promise<AvailableModel[]> {
     return this.request<AvailableModel[]>('GET', '/settings/models/available');
+  }
+
+  async refreshOllamaModels(): Promise<AvailableModel[]> {
+    return this.request<AvailableModel[]>('POST', '/settings/models/ollama/refresh');
   }
 
   async checkGoogleModels(apiKey?: string): Promise<GoogleModelCheckResponse> {
@@ -517,16 +433,6 @@ export class AhriApiClient {
   createChatWebSocket(): WebSocket {
     const wsUrl = this.baseUrl.replace(/^http/, 'ws');
     return new WebSocket(`${wsUrl}/chat/ws`);
-  }
-
-  createAgentWebSocket(): WebSocket {
-    const wsUrl = this.baseUrl.replace(/^http/, 'ws');
-    return new WebSocket(`${wsUrl}/agent/ws`);
-  }
-
-  createAgentModeWebSocket(executionId: number): WebSocket {
-    const wsUrl = this.baseUrl.replace(/^http/, 'ws');
-    return new WebSocket(`${wsUrl}/agent-mode/ws/${executionId}`);
   }
 
   // =========================================================================

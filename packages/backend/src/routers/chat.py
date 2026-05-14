@@ -5,11 +5,26 @@ import asyncio
 import base64
 import logging
 import os
+import re
 import tempfile
 import threading
 import time
 from datetime import datetime
 from typing import Optional
+
+_SEARCH_RE = re.compile(
+    r'\b(pesquise?|busque?|procure?|encontre|pesquisa|busca'
+    r'|search(\s+for)?|look\s+up|find(\s+(info|information|out))?'
+    r'|notícia[s]?|noticia[s]?|recente[s]?\s+notícia[s]?|últimas?\s+notícia[s]?'
+    r'|news|current\s+(news|events?)|latest\s+news'
+    r'|wiki|reference[s]?)\b',
+    re.IGNORECASE
+)
+
+
+def _detect_search_intent(message: str) -> bool:
+    """Detecta se o usuário quer uma pesquisa web (multilíngue)."""
+    return bool(_SEARCH_RE.search(message))
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from jose import JWTError, jwt
@@ -17,18 +32,19 @@ from src.core.llm_clients import GeminiClient
 
 from src.config import get_settings
 from src.dependencies import AuthDep, DbDep, SettingsDep
-from src.models.schemas import ChatRequest, ChatResponse, ChatMessageSchema, AgentTaskSchema, FileAttachment
-from src.services.llm_service import get_llm_service
+from src.models.schemas import ChatRequest, ChatResponse, ChatMessageSchema, FileAttachment
+from src.services.llm_service import create_llm_service
 from src.services.memory_service import MemoryService
 from src.services.session_service import SessionService
 from src.services.persona_service import get_active_persona
 from src.services.spotify_service import get_spotify_service
 from src.core.prompt_builder import build_system_prompt
-from src.core.save_tag_parser import extract_save_tags, extract_agent_tags, clean_all_tags
+from src.core.model_capabilities import infer_model_capabilities, parse_capability_overrides, resolve_chat_model_alias
+from src.core.save_tag_parser import extract_save_tags, clean_all_tags
 from src.core.memory_analyzer import analyze_incremental, analyze_incremental_v2, TIER_MAP
 from src.services.semantic_memory_service import SemanticMemoryService
 from src.services.vector_service import get_vector_service
-from src.services.agent_service import get_permission_level, execute_task as execute_agent_task
+
 from src.services.compaction_service import CompactionService
 from src.services.search_service import SearchService
 
@@ -71,14 +87,14 @@ def _upload_file_to_gemini(file_data_b64: str, mime_type: str, filename: str = "
 
 
 async def _build_context(
-    db: DbDep, 
-    persona_name: str, 
-    model: str, 
-    compacted_context: str = "", 
-    mode: str = "default", 
+    db: DbDep,
+    persona_name: str,
+    model: str,
+    compacted_context: str = "",
+    mode: str = "default",
     last_user_msg: str = ""
-) -> tuple[str, list[dict], str]:
-    """Constrói system prompt e carrega contexto (incluindo busca)."""
+) -> tuple[str, list[dict], str, bool]:
+    """Constrói system prompt e carrega contexto (incluindo busca dual)."""
     mem_svc = MemoryService(db)
     settings = get_settings()
 
@@ -95,31 +111,44 @@ async def _build_context(
     except Exception:
         pass
 
-    # 3. Pesquisa Dinâmica (Web ou Lore)
+    # 3. Dual Web Search (auto-detect ou modo explícito)
     search_context = ""
-    if mode == "web_search" and last_user_msg and settings.internet_search_enabled:
-        try:
-            search_svc = SearchService(db)
-            results = await search_svc.search(last_user_msg)
-            if results.get("results"):
-                search_context = "--- RESULTADOS DA WEB ---\n"
-                for r in results["results"]:
-                    search_context += f"- {r['title']}: {r['snippet']} ({r['link']})\n"
-                logger.info(f"Web search results injected for: {last_user_msg[:30]}")
-        except Exception as e:
-            logger.error(f"Web search injection error: {e}")
+    search_used = False
+    should_search = (
+        mode in ("web_search", "lore_search") or
+        (mode == "default" and _detect_search_intent(last_user_msg))
+    )
 
-    elif mode == "lore_search" and last_user_msg:
+    if should_search and last_user_msg and bool(settings.cse_api_key):
+        search_svc = SearchService(db)
+        web_section = ""
+        community_section = ""
+
+        # Busca estrita — fontes credenciadas/oficiais
         try:
-            vector_svc = get_vector_service(persona_name)
-            results = vector_svc.search(last_user_msg, limit=3)
-            if results:
-                search_context = f"--- LORE DO MUNDO / MEMORIA ({persona_name}) ---\n"
-                for r in results:
-                    search_context += f"- {r['content']}\n"
-                logger.info(f"Lore search results injected for: {last_user_msg[:30]}")
+            strict = await search_svc.search(last_user_msg)
+            if strict.get("results"):
+                web_section = "--- FONTES CREDENCIADAS ---\n"
+                for r in strict["results"]:
+                    web_section += f"- {r['title']}: {r['snippet']} ({r['link']})\n"
         except Exception as e:
-            logger.error(f"Lore search injection error: {e}")
+            logger.error(f"Strict web search error: {e}")
+
+        # Busca permissiva — comunidades, Reddit, fóruns, wikis
+        try:
+            community = await search_svc.community_search(last_user_msg)
+            if community.get("results"):
+                community_section = "--- COMUNIDADES (Reddit / Fóruns / Wiki) ---\n"
+                for r in community["results"]:
+                    community_section += f"- {r['title']}: {r['snippet']} ({r['link']})\n"
+        except Exception as e:
+            logger.error(f"Community search error: {e}")
+
+        if web_section or community_section:
+            parts = [p for p in [web_section, community_section] if p]
+            search_context = "\n".join(parts)
+            search_used = True
+            logger.info(f"Dual search completed for: {last_user_msg[:40]}")
 
     # 4. Load dual-layer memory (v3.2.0)
     semantic_svc = SemanticMemoryService(db)
@@ -132,7 +161,14 @@ async def _build_context(
         logger.warning(f"Could not load semantic memory, falling back to legacy: {e}")
 
     # 5. Monta Prompt
-    is_local = model == "LOCAL"
+    actual_model, provider_hint = resolve_chat_model_alias(model, settings)
+    profile = infer_model_capabilities(
+        actual_model,
+        provider_hint,
+        vision_patterns=settings.ollama_vision_patterns,
+        overrides=parse_capability_overrides(settings.model_capabilities_overrides),
+    )
+    is_local = profile.is_local
     system_prompt = build_system_prompt(
         user_profile=profile,
         persona_name=persona_name,
@@ -148,7 +184,7 @@ async def _build_context(
         semantic_tiers=semantic_tiers,
     )
 
-    return system_prompt, profile, search_context
+    return system_prompt, profile, search_context, search_used
 
 
 def _process_save_tags(full_response: str, persona_name: str) -> list[str]:
@@ -168,36 +204,6 @@ def _process_save_tags(full_response: str, persona_name: str) -> list[str]:
 
     return notifications
 
-
-def _process_agent_tags(full_response: str) -> list[AgentTaskSchema]:
-    """Processa [[AGENT:]] tags e executa/enfileira tasks."""
-    tasks = []
-    tags = extract_agent_tags(full_response)
-
-    for tag in tags:
-        perm = get_permission_level(tag.capability)
-
-        if perm.value == "SAFE":
-            # Executa automaticamente
-            result = execute_agent_task(tag.capability, tag.parameters)
-            tasks.append(AgentTaskSchema(
-                capability=tag.capability,
-                parameters=tag.parameters,
-                permission_level=perm,
-                status="completed" if not result.get("error") else "failed",
-                result=result.get("result", ""),
-                error=result.get("error", ""),
-            ))
-        else:
-            # Requer aprovação
-            tasks.append(AgentTaskSchema(
-                capability=tag.capability,
-                parameters=tag.parameters,
-                permission_level=perm,
-                status="pending",
-            ))
-
-    return tasks
 
 
 def _run_memory_analysis_bg(user_msg: str, ai_msg: str, profile: dict, session_id: Optional[int] = None):
@@ -252,8 +258,7 @@ async def send_message(
     session_svc = SessionService(db)
 
     # 1. Configura o modelo LLM
-    llm_svc = get_llm_service()
-    llm_svc.set_mode(request.model)
+    llm_svc = create_llm_service(request.model)
 
     # 2. Busca/cria sessão ativa
     if request.session_id:
@@ -305,10 +310,10 @@ async def send_message(
         compacted_context = await session_svc.get_session_summary(session_id)
 
     # 4. Constrói system prompt com contexto completo (incluindo busca)
-    system_prompt, profile, search_ctx = await _build_context(
-        db=db, 
-        persona_name=persona_name, 
-        model=request.model, 
+    system_prompt, profile, search_ctx, search_used = await _build_context(
+        db=db,
+        persona_name=persona_name,
+        model=request.model,
         compacted_context=compacted_context,
         mode=request.mode,
         last_user_msg=request.message
@@ -374,10 +379,6 @@ async def send_message(
     else:
         notifications = []
 
-    # 8. Processa [[AGENT:]] tags (assume fast enough or internal async, but keeping sync for now as it calls agent_service)
-    agent_tasks = _process_agent_tags(full_response)
-
-
     # 8. Limpa tags do texto de display
     clean_response = clean_all_tags(full_response)
 
@@ -403,9 +404,9 @@ async def send_message(
             timestamp=datetime.now().strftime("%H:%M:%S"),
             meta={"model": request.model},
         ),
-        agent_tasks=agent_tasks,
         memory_notifications=notifications,
-        search_context=search_ctx if search_ctx else None
+        search_context=search_ctx if search_ctx else None,
+        search_used=search_used,
     )
 
 
@@ -465,12 +466,12 @@ async def chat_websocket(websocket: WebSocket, settings: SettingsDep):
                     continue
 
                 persona_name = get_active_persona()
-                llm_svc = get_llm_service()
-                llm_svc.set_mode(model)
+                llm_svc = create_llm_service(model)
 
-                # Obtem db session via import direto
-                from src.models.database import get_db
-                async for db in get_db():
+                # Obtem db session diretamente (WS não tem FastAPI DI)
+                from src.models.database import async_session_factory
+                async with async_session_factory() as db:
+                    session_svc = SessionService(db)
                     # 2. Busca/cria sessão
                     session_id = data.get("session_id")
                     if session_id:
@@ -516,11 +517,19 @@ async def chat_websocket(websocket: WebSocket, settings: SettingsDep):
                     else:
                         compacted_context = await session_svc.get_session_summary(session_id)
 
-                    # 3. Build context (includes search injection)
-                    system_prompt, profile, search_ctx = await _build_context(
-                        db=db, 
-                        persona_name=persona_name, 
-                        model=model, 
+                    # 3. Build context (includes dual search)
+                    # Notifica o frontend antes de pesquisar
+                    will_search = (
+                        mode in ("web_search", "lore_search") or
+                        (mode == "default" and _detect_search_intent(message))
+                    ) and bool(settings.cse_api_key)
+                    if will_search:
+                        await websocket.send_json({"type": "status", "content": "🔍 Pesquisando..."})
+
+                    system_prompt, profile, search_ctx, search_used = await _build_context(
+                        db=db,
+                        persona_name=persona_name,
+                        model=model,
                         compacted_context=compacted_context,
                         mode=mode,
                         last_user_msg=message
@@ -595,7 +604,6 @@ async def chat_websocket(websocket: WebSocket, settings: SettingsDep):
                         notifications = await loop.run_in_executor(None, _process_save_tags, full_response, persona_name)
                     else:
                         notifications = []
-                    agent_tasks = _process_agent_tags(full_response)
                     clean_response = clean_all_tags(full_response)
 
                     # Salva resposta
@@ -610,9 +618,9 @@ async def chat_websocket(websocket: WebSocket, settings: SettingsDep):
                     await websocket.send_json({
                         "type": "done",
                         "content": clean_response,
-                        "agent_tasks": [t.model_dump() for t in agent_tasks],
                         "memory_notifications": notifications,
-                        "search_context": search_ctx if search_ctx else None
+                        "search_context": search_ctx if search_ctx else None,
+                        "search_used": search_used,
                     })
 
                     # Background memory analysis
@@ -621,8 +629,6 @@ async def chat_websocket(websocket: WebSocket, settings: SettingsDep):
                         args=(message, clean_response, profile, session_id),
                         daemon=True,
                     ).start()
-
-                    break  # Só precisamos de uma sessão db
 
     except WebSocketDisconnect:
         logger.info("WebSocket client disconnected")

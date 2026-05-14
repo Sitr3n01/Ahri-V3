@@ -23,6 +23,7 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "lint": "tsc --noEmit",
+    "test": "vitest run src --environment node",
     "type-check": "tsc --noEmit"
   },
   "devDependencies": {

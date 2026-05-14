@@ -9,6 +9,7 @@ from typing import Optional
 from sqlalchemy import select, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.time import utc_now
 from src.models.database import ChatSession, ChatMessage
 from src.services.persona_service import get_active_persona
 
@@ -100,10 +101,12 @@ class SessionService:
             "updated_at": session.updated_at.isoformat(),
             "messages": [
                 {
+                    "id": msg.id,
                     "role": msg.role,
                     "content": msg.content,
                     "images": msg.images or [],
                     "timestamp": msg.timestamp,
+                    "created_at": msg.created_at.isoformat() if msg.created_at else None,
                     "meta": msg.meta or {},
                 }
                 for msg in messages
@@ -147,7 +150,7 @@ class SessionService:
         )
         session = sess_result.scalar_one_or_none()
         if session:
-            session.updated_at = datetime.utcnow()
+            session.updated_at = utc_now()
 
         await self.db.commit()
         await self.db.refresh(msg)

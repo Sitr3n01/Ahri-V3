@@ -49,6 +49,9 @@ data/db/*.db
 data/db/*.db-journal
 data/vector_db/
 data/assets/
+packages/backend/ahri.db
+packages/backend/=1.0.0
+packages/backend/data/
 *.lock
 
 # === Electron ===
@@ -68,3 +71,8 @@ cloudflare.log
 *.tmp
 coverage/
 .nyc_output/
+
+# === Local dev artifacts (not in git) ===
+.claude/worktrees/
+dev_log.txt
+packages/desktop/test-req.mjs

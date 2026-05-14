@@ -8,28 +8,96 @@ export interface Attachment {
   type: 'image' | 'video' | 'pdf';
   data: string; // base64
   name: string;
-  preview?: string; // data URL for images
+  preview?: string;
+}
+
+/**
+ * Extensão local de ChatMessage com campos necessários para UI:
+ * - id: chave estável para o algoritmo de reconciliação do React
+ * - isStreaming: true enquanto esta mensagem está sendo recebida via WS
+ *
+ * Não modificamos o tipo compartilhado (@ahri/shared) porque o backend
+ * não envia esses campos — eles são exclusivamente de UI.
+ */
+export interface LocalMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  images: string[];
+  timestamp: string;
+  meta: Record<string, unknown>;
+  isStreaming?: boolean;
+}
+
+/** ID reservado para a mensagem placeholder enquanto o stream está ativo. */
+const STREAM_ID = '__stream__';
+
+const SESSIONS_PAGE_SIZE = 15;
+
+/** Converte ChatMessage do backend para LocalMessage com id estável. */
+function fromApiMessage(msg: ChatMessage): LocalMessage {
+  return {
+    id: String((msg as any).id ?? crypto.randomUUID()),
+    role: msg.role,
+    content: msg.content,
+    images: msg.images,
+    timestamp: msg.timestamp,
+    meta: msg.meta,
+    isStreaming: false,
+  };
+}
+
+function autoTitle(message: string): string {
+  const words = message.trim().split(/\s+/).slice(0, 6).join(' ');
+  return words.length > 30 ? words.slice(0, 30) + '…' : words;
+}
+
+async function _ensureSession(
+  get: () => ChatState,
+  set: (fn: Partial<ChatState> | ((s: ChatState) => Partial<ChatState>)) => void,
+  message: string,
+): Promise<void> {
+  if (!get().isPendingNewChat) return;
+  if (get().isCreatingSession) return;
+
+  set({ isCreatingSession: true });
+  try {
+    const session = await api.createSession(autoTitle(message));
+    set((state) => ({
+      sessions: [session, ...state.sessions],
+      activeSessionId: session.id,
+      isPendingNewChat: false,
+      isCreatingSession: false,
+    }));
+  } catch (e) {
+    set({ isCreatingSession: false });
+    throw e;
+  }
 }
 
 interface ChatState {
-  messages: ChatMessage[];
+  messages: LocalMessage[];
   isStreaming: boolean;
-  streamingContent: string;
   activeSessionId: number | null;
   sessions: SessionSummary[];
+  sessionsLoading: boolean;
+  visibleCount: number;
   model: string;
   availableModels: AvailableModel[];
   memoryNotifications: string[];
 
-  // Pending new chat: true when user clicked "New Chat" but hasn't sent a message yet.
-  // Session is created lazily on first message (Claude/ChatGPT pattern).
   isPendingNewChat: boolean;
+  isCreatingSession: boolean;
 
-  // Reasoning Settings
+  /**
+   * Rascunhos por sessão.
+   * Chave: String(sessionId) para sessões existentes, 'new' para novo chat pendente.
+   * Permite que o usuário troque de sessão sem perder o texto digitado.
+   */
+  drafts: Record<string, string>;
+
   reasoningLevel: string;
   enableThinking: boolean;
-
-  // Chat Settings (hydrated from localStorage)
   streamingEnabled: boolean;
   showTimestamps: boolean;
   autoSaveTags: boolean;
@@ -40,7 +108,9 @@ interface ChatState {
   setModel: (model: string) => void;
   loadChatSettings: () => void;
   fetchAvailableModels: () => Promise<void>;
+  refreshOllamaModels: () => Promise<void>;
   fetchSessions: (persona?: string) => Promise<void>;
+  loadMoreSessions: () => void;
   loadSession: (id: number) => Promise<void>;
   createSession: (title?: string) => Promise<void>;
   startNewChat: () => void;
@@ -48,40 +118,40 @@ interface ChatState {
   renameSession: (id: number, title: string) => Promise<void>;
   sendMessage: (message: string, attachments?: Attachment[], mode?: 'default' | 'web_search' | 'lore_search') => Promise<void>;
   sendMessageStreaming: (message: string, attachments?: Attachment[], mode?: 'default' | 'web_search' | 'lore_search') => Promise<void>;
+  cancelStreaming: () => void;
   stopStreaming: () => void;
-  addMessage: (msg: ChatMessage) => void;
+  addMessage: (msg: LocalMessage) => void;
   clearMessages: () => void;
   setReasoningLevel: (level: string) => void;
   setEnableThinking: (enabled: boolean) => void;
-}
-
-/** Gera um título automático a partir das primeiras palavras da mensagem (Claude pattern). */
-function autoTitle(message: string): string {
-  const words = message.trim().split(/\s+/).slice(0, 6).join(' ');
-  return words.length > 60 ? words.slice(0, 60) + '…' : words;
+  saveDraft: (key: string, text: string) => void;
+  clearMemoryNotifications: () => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   isStreaming: false,
-  streamingContent: '',
   activeSessionId: null,
   sessions: [],
+  sessionsLoading: false,
+  visibleCount: SESSIONS_PAGE_SIZE,
   model: 'LITE',
   availableModels: [],
   memoryNotifications: [],
-  reasoningLevel: 'medium',
-  enableThinking: false,
   isPendingNewChat: false,
+  isCreatingSession: false,
+  drafts: {},
 
-  // Chat settings defaults (overridden by loadChatSettings)
   streamingEnabled: true,
   showTimestamps: true,
   autoSaveTags: true,
   internetSearchEnabled: false,
   globalEnableThinking: false,
+  reasoningLevel: 'medium',
+  enableThinking: false,
 
   setModel: (model) => set({ model }),
+
   loadChatSettings: () => {
     try {
       const stored = localStorage.getItem('ahri_settings_chat');
@@ -96,18 +166,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
           reasoningLevel: parsed.reasoning_level ?? 'off',
         });
       }
-    } catch { /* ignore parse errors */ }
+    } catch { /* ignore */ }
   },
+
   setReasoningLevel: (level) => set({ reasoningLevel: level }),
   setEnableThinking: (enabled) => set({ enableThinking: enabled }),
+
+  /**
+   * Salva rascunho de texto para uma sessão específica.
+   * Chamado pelo ChatInput a cada mudança de texto.
+   * Barato: Zustand updates são síncronos e o objeto de drafts é pequeno.
+   */
+  saveDraft: (key, text) =>
+    set((state) => ({ drafts: { ...state.drafts, [key]: text } })),
+
+  clearMemoryNotifications: () => set({ memoryNotifications: [] }),
 
   fetchAvailableModels: async () => {
     try {
       const models = await api.getAvailableModels();
       set({ availableModels: models });
-      // Se o modelo atual não está na lista, usa o primeiro disponível
-      const currentModel = useChatStore.getState().model;
-      if (models.length > 0 && !models.find(m => m.id === currentModel)) {
+      const current = useChatStore.getState().model;
+      if (models.length > 0 && !models.find((m) => m.id === current)) {
         set({ model: models[0].id });
       }
     } catch (e) {
@@ -115,21 +195,39 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  refreshOllamaModels: async () => {
+    try {
+      const ollamaModels = await api.refreshOllamaModels();
+      const current = useChatStore.getState().availableModels;
+      const nonOllama = current.filter((m) => (m.group || m.provider) !== 'ollama');
+      set({ availableModels: [...nonOllama, ...ollamaModels] });
+    } catch (e) {
+      console.error('Failed to refresh Ollama models:', e);
+    }
+  },
+
   fetchSessions: async (persona) => {
+    set({ sessionsLoading: true });
     try {
       const sessions = await api.listSessions(persona);
-      set({ sessions });
+      set({ sessions, sessionsLoading: false, visibleCount: SESSIONS_PAGE_SIZE });
     } catch (e) {
+      set({ sessionsLoading: false });
       console.error('Failed to fetch sessions:', e);
     }
   },
 
+  loadMoreSessions: () =>
+    set((state) => ({ visibleCount: state.visibleCount + SESSIONS_PAGE_SIZE })),
+
   loadSession: async (id) => {
+    get().cancelStreaming();
     try {
       const detail = await api.getSession(id);
       set({
         activeSessionId: id,
-        messages: detail.messages,
+        // Mapeia para LocalMessage para garantir IDs estáveis
+        messages: detail.messages.map(fromApiMessage),
         isPendingNewChat: false,
       });
     } catch (e) {
@@ -151,16 +249,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  /**
-   * Inicia um novo chat localmente (Claude/ChatGPT pattern).
-   * NÃO cria sessão no backend ainda — isso acontece ao enviar a primeira mensagem.
-   */
   startNewChat: () => {
+    const { isPendingNewChat, messages } = get();
+    if (isPendingNewChat && messages.length === 0) return;
+    get().cancelStreaming();
     set({
       messages: [],
       activeSessionId: null,
       isPendingNewChat: true,
-      streamingContent: '',
       isStreaming: false,
       memoryNotifications: [],
     });
@@ -187,53 +283,43 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       await api.renameSession(id, title);
       set((state) => ({
-        sessions: state.sessions.map((s) =>
-          s.id === id ? { ...s, title } : s,
-        ),
+        sessions: state.sessions.map((s) => (s.id === id ? { ...s, title } : s)),
       }));
     } catch (e) {
       console.error('Failed to rename session:', e);
     }
   },
 
-  // HTTP (non-streaming) fallback
+  // HTTP fallback — também usa o padrão de placeholder para UX consistente
   sendMessage: async (message, attachments = [], mode = 'default') => {
-    const { model, reasoningLevel, enableThinking, autoSaveTags, internetSearchEnabled, isPendingNewChat } = get();
+    const { model, reasoningLevel, enableThinking, autoSaveTags } = get();
+    await _ensureSession(get, set, message);
 
-    // Se está em modo pendente, cria a sessão agora com o título automático
-    if (isPendingNewChat) {
-      try {
-        const session = await api.createSession(autoTitle(message));
-        set((state) => ({
-          sessions: [session, ...state.sessions],
-          activeSessionId: session.id,
-          isPendingNewChat: false,
-        }));
-      } catch (e) {
-        console.error('Failed to auto-create session:', e);
-      }
-    }
+    const images = attachments.filter((a) => a.type === 'image').map((a) => a.data);
+    const video = attachments.find((a) => a.type === 'video');
+    const pdfs = attachments.filter((a) => a.type === 'pdf');
 
-    // Wire: internet_search_enabled → override mode to web_search when default
-    const effectiveMode = (mode === 'default' && internetSearchEnabled) ? 'web_search' : mode;
-
-    // Extrai images, video, pdfs
-    const images = attachments.filter(a => a.type === 'image').map(a => a.data);
-    const video = attachments.find(a => a.type === 'video');
-    const pdfs = attachments.filter(a => a.type === 'pdf');
-
-    // Adiciona mensagem do user imediatamente
-    const userMsg: ChatMessage = {
+    const userMsg: LocalMessage = {
+      id: crypto.randomUUID(),
       role: 'user',
       content: message,
       images,
       timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       meta: {},
     };
-    set((state) => ({
-      messages: [...state.messages, userMsg],
+
+    // Placeholder enquanto aguarda resposta HTTP (mesma UX do streaming)
+    const placeholderMsg: LocalMessage = {
+      id: STREAM_ID,
+      role: 'assistant',
+      content: '',
+      images: [],
+      timestamp: '',
+      meta: {},
       isStreaming: true,
-    }));
+    };
+
+    set((state) => ({ messages: [...state.messages, userMsg, placeholderMsg], isStreaming: true }));
 
     try {
       const response = await api.sendMessage({
@@ -241,150 +327,175 @@ export const useChatStore = create<ChatState>((set, get) => ({
         session_id: get().activeSessionId ?? undefined,
         images,
         video: video ? { data: video.data, name: video.name } : undefined,
-        pdfs: pdfs.map(p => ({ data: p.data, name: p.name })),
-        mode: effectiveMode,
+        pdfs: pdfs.map((p) => ({ data: p.data, name: p.name })),
+        mode,
         model,
         reasoning_level: reasoningLevel,
         enable_thinking: enableThinking,
         auto_save_tags: autoSaveTags,
       });
 
+      const finalMsg = fromApiMessage(response.message);
       set((state) => ({
-        messages: [...state.messages, response.message],
+        messages: state.messages.map((m) => (m.id === STREAM_ID ? finalMsg : m)),
         isStreaming: false,
         memoryNotifications: response.memory_notifications,
       }));
     } catch (e) {
-      console.error('Failed to send message:', e);
-      const errorMsg: ChatMessage = {
+      const errorMsg: LocalMessage = {
+        id: crypto.randomUUID(),
         role: 'assistant',
         content: `[Erro] Falha ao enviar mensagem: ${e}`,
         images: [],
         timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
         meta: { error: true },
+        isStreaming: false,
       };
       set((state) => ({
-        messages: [...state.messages, errorMsg],
+        messages: state.messages.map((m) => (m.id === STREAM_ID ? errorMsg : m)),
         isStreaming: false,
       }));
     }
   },
 
-  // WebSocket streaming
   sendMessageStreaming: async (message, attachments = [], mode = 'default') => {
-    const { model, reasoningLevel, enableThinking, autoSaveTags, internetSearchEnabled, isPendingNewChat } = get();
+    const { model, reasoningLevel, enableThinking, autoSaveTags } = get();
+    await _ensureSession(get, set, message);
 
-    // Se está em modo pendente, cria a sessão agora com o título automático
-    if (isPendingNewChat) {
-      try {
-        const session = await api.createSession(autoTitle(message));
-        set((state) => ({
-          sessions: [session, ...state.sessions],
-          activeSessionId: session.id,
-          isPendingNewChat: false,
-        }));
-      } catch (e) {
-        console.error('Failed to auto-create session:', e);
-      }
-    }
+    const images = attachments.filter((a) => a.type === 'image').map((a) => a.data);
+    const video = attachments.find((a) => a.type === 'video');
+    const pdfs = attachments.filter((a) => a.type === 'pdf');
 
-    // Wire: internet_search_enabled → override mode to web_search when default
-    const effectiveMode = (mode === 'default' && internetSearchEnabled) ? 'web_search' : mode;
-
-    // Extrai images, video, pdfs
-    const images = attachments.filter(a => a.type === 'image').map(a => a.data);
-    const video = attachments.find(a => a.type === 'video');
-    const pdfs = attachments.filter(a => a.type === 'pdf');
-
-    // Adiciona mensagem do user imediatamente
-    const userMsg: ChatMessage = {
+    const userMsg: LocalMessage = {
+      id: crypto.randomUUID(),
       role: 'user',
       content: message,
       images,
       timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       meta: {},
     };
-    set((state) => ({
-      messages: [...state.messages, userMsg],
+
+    /**
+     * Mensagem placeholder com id reservado STREAM_ID.
+     * Fica no array de mensagens e é atualizada chunk-a-chunk.
+     * Quando o stream termina, é substituída pela mensagem final com id real.
+     * Isso elimina o "scroll jump" causado por streamingContent separado.
+     */
+    const streamingPlaceholder: LocalMessage = {
+      id: STREAM_ID,
+      role: 'assistant',
+      content: '',
+      images: [],
+      timestamp: '',
+      meta: {},
       isStreaming: true,
-      streamingContent: '',
+    };
+
+    set((state) => ({
+      messages: [...state.messages, userMsg, streamingPlaceholder],
+      isStreaming: true,
     }));
 
-    // Configura handlers
+    /**
+     * Captura a geração ANTES de registrar handlers.
+     * Qualquer cancel() incrementa chatWs.generation, fazendo os guards falharem.
+     * Isso garante que chunks de streams cancelados nunca poluam o estado.
+     */
+    const gen = chatWs.beginRequest();
+
     chatWs.setHandlers({
       onChunk: (content) => {
+        // Guard de geração: ignora chunks de streams cancelados ou anteriores
+        if (gen !== chatWs.generation) return;
+
+        // Atualiza APENAS a mensagem placeholder — O(n) no pior caso, mas
+        // com keys estáveis o React só re-renderiza essa mensagem específica.
         set((state) => ({
-          streamingContent: state.streamingContent + content,
+          messages: state.messages.map((m) =>
+            m.id === STREAM_ID ? { ...m, content: m.content + content } : m,
+          ),
         }));
       },
-      onDone: async (data) => {
-        const aiMsg: ChatMessage = {
+
+      onDone: (data) => {
+        if (gen !== chatWs.generation) return;
+
+        // Substitui o placeholder pela mensagem final com metadados reais
+        const finalMsg: LocalMessage = {
+          id: crypto.randomUUID(),
           role: 'assistant',
           content: data.content,
           images: [],
           timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
           meta: { model },
-        };
-        set((state) => ({
-          messages: [...state.messages, aiMsg],
           isStreaming: false,
-          streamingContent: '',
+        };
+
+        set((state) => ({
+          messages: state.messages.map((m) => (m.id === STREAM_ID ? finalMsg : m)),
+          isStreaming: false,
           memoryNotifications: data.memory_notifications,
         }));
-
-        // Adiciona agent tasks ao agent-store
-        if (data.agent_tasks && data.agent_tasks.length > 0) {
-          const { useAgentStore } = await import('./agent-store');
-          data.agent_tasks.forEach((task: any) => {
-            useAgentStore.getState().addTask(task);
-          });
-        }
       },
+
       onError: (error) => {
-        const errorMsg: ChatMessage = {
+        if (gen !== chatWs.generation) return;
+
+        const errorMsg: LocalMessage = {
+          id: crypto.randomUUID(),
           role: 'assistant',
           content: `[Erro] ${error}`,
           images: [],
           timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
           meta: { error: true },
-        };
-        set((state) => ({
-          messages: [...state.messages, errorMsg],
           isStreaming: false,
-          streamingContent: '',
+        };
+
+        set((state) => ({
+          messages: state.messages.map((m) => (m.id === STREAM_ID ? errorMsg : m)),
+          isStreaming: false,
         }));
       },
     });
 
-    // Conecta WS se necessário, senão fallback para HTTP
     if (!chatWs.isConnected) {
       const connected = await chatWs.connect();
       if (!connected) {
-        // Revert optimistic update (remove user message) before fallback to avoid duplicate
+        // Reverte mensagens otimistas antes do fallback para evitar duplicata
         set((state) => ({
-          messages: state.messages.slice(0, -1),
-          isStreaming: false
+          messages: state.messages.filter((m) => m.id !== userMsg.id && m.id !== STREAM_ID),
+          isStreaming: false,
         }));
         return get().sendMessage(message, attachments, mode);
       }
     }
 
-    chatWs.sendMessage(message, model, get().activeSessionId ?? undefined, images, video, pdfs, effectiveMode, {
+    chatWs.sendMessage(message, model, get().activeSessionId ?? undefined, images, video, pdfs, mode, {
       reasoning_level: reasoningLevel,
       enable_thinking: enableThinking,
       auto_save_tags: autoSaveTags,
     });
   },
 
-  stopStreaming: () => {
-    const { isStreaming } = get();
-    if (!isStreaming) return;
+  cancelStreaming: () => {
+    if (!get().isStreaming) return;
+    chatWs.cancel();
+    // Remove o placeholder do array — mensagem cancelada não fica no histórico
+    set((state) => ({
+      messages: state.messages.filter((m) => m.id !== STREAM_ID),
+      isStreaming: false,
+    }));
+  },
 
-    chatWs.cancel(); // We need to add this method to chatWs
-    set({ isStreaming: false, streamingContent: '' });
+  stopStreaming: () => {
+    if (!get().isStreaming) return;
+    chatWs.cancel();
+    set((state) => ({
+      messages: state.messages.filter((m) => m.id !== STREAM_ID),
+      isStreaming: false,
+    }));
   },
 
   addMessage: (msg) => set((state) => ({ messages: [...state.messages, msg] })),
-
   clearMessages: () => set({ messages: [], activeSessionId: null }),
 }));

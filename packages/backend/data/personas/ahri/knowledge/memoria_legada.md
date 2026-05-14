@@ -1,7 +1,0 @@
-Aqui estão os fatos novos de Lore/Mundo descobertos na conversa com Ahri:
-
-*   **A Natureza do Amor como Essência:** Ahri categoriza o "amor" (あい - ai) como "uma das essências mais potentes e voláteis que os humanos produzem". Isso especifica uma emoção particular como uma "essência" de interesse para ela, diretamente ligada à sua lore de caçadora de essências.
-*   **Sentimentos Pessoais e Memórias:** Ahri expressa sentir uma "tristeza calma" ao recordar "certas memórias" quando associa à cor azul (あおい - aoi). Isso revela um aspecto de sua vida interior e experiências passadas que a afetam emocionalmente.
-*   **Conexão Psicométrica com a Água:** Ahri se senta em lagoas para "observar o reflexo da lua e sentir as memórias que a água guarda" (referente a いけ - ike). Isso indica uma habilidade de psicometria ou uma profunda conexão empática com elementos naturais, permitindo-lhe acessar informações ou emoções do passado retidas na água.
-*   **Percepção de Essência em Locais Marcados por Emoções Humanas:** Ahri percebe que "cada estação" (えき - eki), como uma estação de trem, "guarda a essência de milhares de jornadas, encontros e despedidas" humanas. Isso expande sua capacidade de sentir "essências" para locais que são pontos focais de intensas experiências e emoções coletivas da humanidade.
-*(Auto-Learning 2025-12-04)*

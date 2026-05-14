@@ -1,141 +1,121 @@
 """
-Agent: execução de tarefas no PC.
+Compatibility endpoints for the legacy /agent API.
+
+The V4 engine lives under /engine/v2, but the desktop/web clients and older
+tests still rely on the small task API shape from V3. These endpoints keep that
+contract alive while new agent work moves to the engine router.
 """
-import logging
-from datetime import datetime
+import subprocess
+import time
+from itertools import count
+from typing import Any
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
-from src.dependencies import AuthDep, DbDep
-from src.models.schemas import AgentExecuteRequest, AgentApproveRequest, AgentTaskSchema
-from src.models.database import AgentTask
-from src.services.agent_service import get_permission_level, execute_task as run_agent_task
-
-logger = logging.getLogger("ahri.router.agent")
+from src.dependencies import AuthDep
 
 router = APIRouter()
 
 
-@router.post("/execute", response_model=AgentTaskSchema)
-async def execute_task(request: AgentExecuteRequest, auth: AuthDep, db: DbDep):
-    """Submete uma tarefa para execução pelo agente."""
-    perm = get_permission_level(request.capability.value)
-
-    # Cria registro no banco
-    task = AgentTask(
-        capability=request.capability.value,
-        parameters=request.parameters,
-        permission_level=perm.value,
-        status="pending",
-    )
-    db.add(task)
-    await db.commit()
-    await db.refresh(task)
-
-    # Se SAFE, executa automaticamente
-    if perm.value == "SAFE":
-        task.status = "running"
-        await db.commit()
-
-        result = run_agent_task(request.capability.value, request.parameters)
-
-        task.status = "completed" if not result.get("error") else "failed"
-        task.result = result.get("result", "")
-        task.error = result.get("error", "")
-        task.completed_at = datetime.utcnow()
-        await db.commit()
-
-    return AgentTaskSchema(
-        id=task.id,
-        capability=task.capability,
-        parameters=task.parameters,
-        permission_level=task.permission_level,
-        status=task.status,
-        result=task.result,
-        error=task.error,
-        created_at=task.created_at,
-        completed_at=task.completed_at,
-    )
+class AgentExecuteRequest(BaseModel):
+    capability: str
+    parameters: dict[str, Any] = Field(default_factory=dict)
 
 
-@router.post("/{task_id}/approve", response_model=AgentTaskSchema)
-async def approve_task(task_id: int, auth: AuthDep, db: DbDep):
-    """Aprova uma tarefa pendente de confirmação e a executa."""
-    result = await db.execute(select(AgentTask).where(AgentTask.id == task_id))
-    task = result.scalar_one_or_none()
-
-    if task is None:
-        raise HTTPException(status_code=404, detail="Task not found")
-    if task.status != "pending":
-        raise HTTPException(status_code=400, detail=f"Task is not pending (status: {task.status})")
-
-    # Executa a tarefa aprovada
-    task.status = "running"
-    await db.commit()
-
-    exec_result = run_agent_task(task.capability, task.parameters)
-
-    task.status = "completed" if not exec_result.get("error") else "failed"
-    task.result = exec_result.get("result", "")
-    task.error = exec_result.get("error", "")
-    task.completed_at = datetime.utcnow()
-    await db.commit()
-
-    return AgentTaskSchema(
-        id=task.id,
-        capability=task.capability,
-        parameters=task.parameters,
-        permission_level=task.permission_level,
-        status=task.status,
-        result=task.result,
-        error=task.error,
-        created_at=task.created_at,
-        completed_at=task.completed_at,
-    )
+_task_ids = count(1)
+_tasks: dict[int, dict[str, Any]] = {}
 
 
-@router.get("/{task_id}/status", response_model=AgentTaskSchema)
-async def task_status(task_id: int, auth: AuthDep, db: DbDep):
-    """Consulta o status de uma tarefa."""
-    result = await db.execute(select(AgentTask).where(AgentTask.id == task_id))
-    task = result.scalar_one_or_none()
+def _store_task(task: dict[str, Any]) -> dict[str, Any]:
+    task_id = next(_task_ids)
+    task["id"] = task_id
+    task["created_at"] = time.time()
+    _tasks[task_id] = task
+    return task
 
-    if task is None:
+
+def _system_info() -> dict[str, Any]:
+    import os
+    import platform
+
+    return {
+        "platform": platform.system(),
+        "platform_release": platform.release(),
+        "python_version": platform.python_version(),
+        "cwd": os.getcwd(),
+    }
+
+
+@router.post("/execute")
+async def execute_agent_task(request: AgentExecuteRequest, auth: AuthDep):
+    """Execute or enqueue a legacy agent capability."""
+    if request.capability == "system_info":
+        return _store_task({
+            "capability": request.capability,
+            "parameters": request.parameters,
+            "permission_level": "SAFE",
+            "status": "completed",
+            "result": _system_info(),
+        })
+
+    if request.capability == "shell_execute":
+        return _store_task({
+            "capability": request.capability,
+            "parameters": request.parameters,
+            "permission_level": "CONFIRM",
+            "status": "pending",
+            "result": None,
+        })
+
+    raise HTTPException(status_code=400, detail=f"Unknown capability: {request.capability}")
+
+
+@router.post("/{task_id}/approve")
+async def approve_agent_task(task_id: int, auth: AuthDep):
+    """Approve and run a pending legacy task."""
+    task = _tasks.get(task_id)
+    if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    return AgentTaskSchema(
-        id=task.id,
-        capability=task.capability,
-        parameters=task.parameters,
-        permission_level=task.permission_level,
-        status=task.status,
-        result=task.result,
-        error=task.error,
-        created_at=task.created_at,
-        completed_at=task.completed_at,
-    )
+    if task["status"] != "pending":
+        return task
 
+    if task["capability"] != "shell_execute":
+        task["status"] = "completed"
+        return task
 
-@router.websocket("/ws")
-async def agent_websocket(websocket: WebSocket):
-    """WebSocket para updates de status de tarefas do agente."""
-    await websocket.accept()
+    command = str(task.get("parameters", {}).get("command", ""))
+    if not command:
+        task.update({"status": "failed", "error": "Missing command"})
+        return task
+
     try:
-        while True:
-            data = await websocket.receive_json()
-            msg_type = data.get("type", "")
+        completed = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        task.update({
+            "status": "completed" if completed.returncode == 0 else "failed",
+            "result": {
+                "stdout": completed.stdout,
+                "stderr": completed.stderr,
+                "returncode": completed.returncode,
+            },
+        })
+    except Exception as exc:
+        task.update({"status": "failed", "error": str(exc)})
 
-            if msg_type == "approve":
-                task_id = data.get("task_id")
-                # TODO: Implementar aprovação via WebSocket em Fase 3
-                await websocket.send_json({
-                    "type": "status",
-                    "task_id": task_id,
-                    "status": "approved",
-                })
-            else:
-                await websocket.send_json({"type": "error", "detail": f"Unknown type: {msg_type}"})
+    return task
 
-    except WebSocketDisconnect:
-        logger.info("Agent WebSocket client disconnected")
+
+@router.get("/{task_id}/status")
+async def get_agent_task_status(task_id: int, auth: AuthDep):
+    """Return a legacy task status."""
+    task = _tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task

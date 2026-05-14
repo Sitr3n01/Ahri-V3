@@ -1,7 +1,7 @@
 """
 FastAPI dependency injection.
 """
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
@@ -9,19 +9,23 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 
 from src.config import Settings, get_settings
+from src.core.time import utc_now
 from src.models.database import AsyncSession, get_db
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 # Lazy import to avoid circular dependencies
 _llm_service = None
 
 
 async def get_current_user(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict:
     """Valida o JWT token e retorna o payload."""
+    if credentials is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authenticated")
+
     try:
         payload = jwt.decode(
             credentials.credentials,
@@ -38,7 +42,7 @@ async def get_current_user(
 def create_access_token(settings: Settings, data: dict = None) -> str:
     """Cria um JWT access token."""
     to_encode = {"type": "access", "sub": "ahri_user", **(data or {})}
-    expire = datetime.utcnow() + timedelta(minutes=settings.jwt_access_token_expire_minutes)
+    expire = utc_now() + timedelta(minutes=settings.jwt_access_token_expire_minutes)
     to_encode["exp"] = expire
     return jwt.encode(to_encode, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
@@ -46,7 +50,7 @@ def create_access_token(settings: Settings, data: dict = None) -> str:
 def create_refresh_token(settings: Settings, data: dict = None) -> str:
     """Cria um JWT refresh token."""
     to_encode = {"type": "refresh", "sub": "ahri_user", **(data or {})}
-    expire = datetime.utcnow() + timedelta(days=settings.jwt_refresh_token_expire_days)
+    expire = utc_now() + timedelta(days=settings.jwt_refresh_token_expire_days)
     to_encode["exp"] = expire
     return jwt.encode(to_encode, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 

@@ -22,7 +22,7 @@ from typing import AsyncGenerator, Optional
 
 from .types import (
     Message, Role, ToolCall, ToolResult, LLMResponse,
-    EngineState, StopReason, ContinuationDecision
+    EngineState, StopReason, ContinuationDecision, PermissionDecision
 )
 from .events import AgentEvent, EventType
 from .errors import (

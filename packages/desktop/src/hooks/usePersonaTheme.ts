@@ -8,10 +8,9 @@ import { type PersonaTheme } from '@ahri/shared';
  */
 export function usePersonaTheme(personaName?: string): PersonaTheme {
   const activePersona = usePersonaStore((s) => s.activePersona);
-  const personas = usePersonaStore((s) => s.personas);
   const getMergedTheme = usePersonaStore((s) => s.getMergedTheme);
   
   return useMemo(() => {
     return getMergedTheme(personaName || activePersona);
-  }, [personaName, activePersona, personas, getMergedTheme]);
+  }, [personaName, activePersona, getMergedTheme]);
 }

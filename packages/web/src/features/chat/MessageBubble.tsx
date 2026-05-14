@@ -11,6 +11,7 @@ interface MessageBubbleProps {
 
 export function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === 'user';
+  const timestamp = message.created_at || message.timestamp;
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -65,10 +66,12 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             isUser ? 'text-white/60' : 'text-white/40'
           }`}
         >
-          {new Date(message.created_at).toLocaleTimeString('pt-BR', {
-            hour: '2-digit',
-            minute: '2-digit'
-          })}
+          {timestamp.includes('T')
+            ? new Date(timestamp).toLocaleTimeString('pt-BR', {
+                hour: '2-digit',
+                minute: '2-digit'
+              })
+            : timestamp}
         </div>
       </div>
     </div>

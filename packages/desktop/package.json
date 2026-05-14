@@ -2,7 +2,6 @@
   "name": "@ahri/desktop",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
   "main": "electron/main.js",
   "scripts": {
     "dev": "npm run compile:electron && concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
@@ -11,6 +10,7 @@
     "build:electron": "electron-builder",
     "preview": "vite preview",
     "lint": "eslint src --ext .ts,.tsx",
+    "test": "vitest run --environment jsdom",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
@@ -20,7 +20,7 @@
     "react-dom": "^19.0.0",
     "react-markdown": "^9.1.0",
     "react-router-dom": "^7.1.0",
-    "react-syntax-highlighter": "^15.6.6",
+    "react-syntax-highlighter": "^16.1.1",
     "remark-gfm": "^4.0.1",
     "zustand": "^5.0.0"
   },
@@ -31,8 +31,8 @@
     "@vitejs/plugin-react": "^4.3.0",
     "autoprefixer": "^10.4.0",
     "concurrently": "^9.1.0",
-    "electron": "^33.0.0",
-    "electron-builder": "^25.1.0",
+    "electron": "^41.5.0",
+    "electron-builder": "^26.8.1",
     "eslint": "^9.17.0",
     "postcss": "^8.4.0",
     "tailwindcss": "^3.4.0",
@@ -62,5 +62,6 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true
     }
-  }
+  },
+  "type": "module"
 }

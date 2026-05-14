@@ -1,0 +1,206 @@
+/* Settings Persona List (Ultrawide) - Replicates chat sidebar drawer design */
+.settings-persona-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px; /* Increased to match header padding for better centering */
+}
+
+.settings-persona-card {
+  width: 100%;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+  border-radius: 12px;
+  overflow: hidden;
+  background: transparent;
+  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  text-align: left;
+}
+
+.settings-persona-card:hover {
+  /* Restored subtle scale but keeping it centered (no translation) */
+  transform: scale(1.02);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.settings-persona-image-container {
+  position: relative;
+  width: 100%;
+  height: 68px; /* High fidelity ultrawide */
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  transition: all 0.4s ease;
+  background: rgba(0,0,0,0.1);
+}
+
+.settings-persona-card.active .settings-persona-image-container {
+  border-color: color-mix(in srgb, var(--persona-color) 60%, transparent);
+  box-shadow: 
+    0 4px 20px rgba(0, 0, 0, 0.4),
+    0 0 15px color-mix(in srgb, var(--persona-color) 25%, transparent);
+}
+
+.settings-persona-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  will-change: transform;
+}
+
+.settings-persona-card:hover .settings-persona-image {
+  filter: brightness(1.1);
+  /* Removed scale here too to keep proportions perfect as requested */
+}
+
+.settings-persona-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to right, 
+    rgba(0, 0, 0, 0.85) 0%, 
+    rgba(0, 0, 0, 0.35) 50%, 
+    transparent 100%);
+  transition: opacity 0.35s ease;
+}
+
+.settings-persona-info {
+  position: absolute;
+  inset: 0;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.settings-persona-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: white;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+  letter-spacing: 0.2px;
+}
+
+.settings-persona-id {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: rgba(255,255,255,0.55);
+  text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+  margin-top: 1px;
+}
+
+.settings-persona-active-indicator {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--persona-color);
+  box-shadow: 
+    0 0 12px var(--persona-color),
+    0 0 24px color-mix(in srgb, var(--persona-color) 40%, transparent);
+  z-index: 3;
+  border-radius: 0 2px 2px 0;
+}
+
+.settings-persona-card.active {
+  z-index: 10;
+}
+
+/* Unified Settings Block */
+.settings-unified-container {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  border-radius: 24px;
+  /* overflow: hidden removed to allow color picker bubble to overflow */
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.settings-unified-section {
+  padding: 24px;
+}
+
+.settings-unified-section:not(:last-child) {
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.settings-unified-section-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.settings-unified-section-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.settings-unified-section-desc {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.settings-inner-grid {
+  display: grid;
+  gap: 20px;
+}
+
+/* Persona Files Panel Styles */
+.persona-file-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  padding: 16px;
+  transition: all 0.3s ease;
+}
+
+.persona-file-card:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-medium);
+}
+
+.persona-file-action-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px;
+  min-width: 64px;
+  border-radius: 10px;
+  color: var(--text-tertiary);
+  transition: all 0.2s ease;
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.persona-file-action-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  border-color: var(--glass-border);
+}
+
+.persona-file-action-btn:hover svg {
+  color: var(--persona-primary);
+}
+
+/* ============================================================
+   Markdown Override for Narrative Blocks
+   ============================================================ */
+.markdown-override p { margin-bottom: 0.5em; }
+.markdown-override h1, .markdown-override h2, .markdown-override h3 { margin-top: 1em; margin-bottom: 0.5em; font-weight: 600; color: var(--text-primary); }
+.markdown-override h1 { font-size: 1.1em; }
+.markdown-override h2 { font-size: 1.05em; }
+.markdown-override ul { list-style-type: disc; padding-left: 1.5em; margin-bottom: 0.5em; }
+.markdown-override ol { list-style-type: decimal; padding-left: 1.5em; margin-bottom: 0.5em; }
+.markdown-override li { margin-bottom: 0.25em; }
+.markdown-override strong { font-weight: 600; color: var(--text-primary); }

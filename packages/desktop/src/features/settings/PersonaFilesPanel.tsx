@@ -1,4 +1,4 @@
-import React, { useState, useEffect, DragEvent } from 'react';
+import React, { useState, useEffect, DragEvent, useCallback } from 'react';
 import { useT } from '@/stores/i18n-store';
 import { FileText, Scroll, Book, ExternalLink, Folder, Trash2 } from 'lucide-react';
 
@@ -31,12 +31,7 @@ export function PersonaFilesPanel({ personaName, basePath }: PersonaFilesProps) 
     const [draggingFile, setDraggingFile] = useState<string | null>(null);
     const [isElectron, setIsElectron] = useState(false);
 
-    useEffect(() => {
-        setIsElectron(!!window.ahri?.isElectron);
-        loadFileInfo();
-    }, [personaName]);
-
-    const loadFileInfo = async () => {
+    const loadFileInfo = useCallback(async () => {
         if (!window.ahri?.agent) return;
 
         const agent = window.ahri.agent;
@@ -101,7 +96,12 @@ export function PersonaFilesPanel({ personaName, basePath }: PersonaFilesProps) 
         } catch {
             setKnowledgeCount(0);
         }
-    };
+    }, [basePath, personaName]);
+
+    useEffect(() => {
+        setIsElectron(!!window.ahri?.isElectron);
+        loadFileInfo();
+    }, [loadFileInfo]);
 
     const handleOpenFile = async (path: string) => {
         if (window.ahri?.agent) {

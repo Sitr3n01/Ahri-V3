@@ -11,6 +11,7 @@ export interface PersonaTheme {
   avatar: string;
   background: string;
   backgroundMobile: string;
+  background_mobile?: string;
 }
 
 export const personaThemes: Record<string, PersonaTheme> = {
@@ -180,6 +181,6 @@ export function mergePersonaTheme(staticTheme: PersonaTheme, overrides?: Partial
     glow: overrides.glow || staticTheme.glow,
     avatar: overrides.avatar || staticTheme.avatar,
     background: overrides.background || staticTheme.background,
-    backgroundMobile: overrides.backgroundMobile || staticTheme.backgroundMobile,
+    backgroundMobile: overrides.backgroundMobile || overrides.background_mobile || staticTheme.backgroundMobile,
   };
 }
