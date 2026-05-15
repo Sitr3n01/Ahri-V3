@@ -2,7 +2,7 @@
 
 This is the public-facing roadmap for Ahri V3. It is intentionally lightweight: items here are directional, not committed deliveries.
 
-For internal phase tracking and engineering rules, see [`AGENTS.md`](../AGENTS.md).
+For quality gate rules, see [`quality/quality-gate.config.cjs`](../quality/quality-gate.config.cjs).
 For deep architecture, see [`architecture.md`](./architecture.md).
 
 ---

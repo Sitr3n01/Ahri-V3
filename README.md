@@ -42,7 +42,7 @@ Only listing what is actually implemented in this repository.
 - React web client (`packages/web`) on React 19 and Vite 6.
 - Shared TypeScript package (`packages/shared`) for types, themes, and API client.
 - Deterministic quality gate (`scripts/quality/`) with file-metric, coverage, duplication, complexity, and audit collectors.
-- GitHub Actions workflows for the quality gate and AI-assisted reviewers (`.github/workflows/`).
+- GitHub Actions workflows for deterministic quality gates (`.github/workflows/`).
 
 ## Architecture
 
@@ -71,12 +71,7 @@ docs/
   roadmap.md
   v3-vs-v2.md
   assets/screenshots/
-  development/
-    bug-report.md
-    changelog.md
-    persona-design-system.md
-    ai-workflow/v4-engine-implementation-guide.md
-.github/workflows/   Quality gate and AI-reviewer CI
+.github/workflows/   Deterministic quality gate CI
 data/                Personas (seed content tracked, runtime data ignored)
 ```
 
@@ -185,7 +180,7 @@ The repository ships with a deterministic quality gate that runs the same checks
 
 GitHub Actions workflows in `.github/workflows/` run the same gate on every push.
 
-The detailed engineering rules the gate enforces are documented in [`AGENTS.md`](./AGENTS.md).
+The detailed engineering rules the gate enforces live in [`quality/quality-gate.config.cjs`](./quality/quality-gate.config.cjs) and the scripts under [`scripts/quality/`](./scripts/quality/).
 
 ## Privacy and Security Notes
 

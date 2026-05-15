@@ -93,10 +93,24 @@ packages/backend/data/personas/*/history/
 packages/backend/data/personas/*/memory.json
 packages/backend/data/personas/*/rag_tracker.json
 
-# === Local dev artifacts (not in git) ===
-.claude/worktrees/
-.claude/local/
-.claude/cache/
+# === Local AI/development artifacts (not in git) ===
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.agent/
+.agents/
+.claude/
+.codex/
+.cursor/
+.continue/
+.aider*
+.github/prompts/
+.github/workflows/claude-quality-assistant.yml
+.github/workflows/codex-quality-explainer.yml
+docs/development/
+reports/
+!reports/.gitkeep
+.quality-gate/
 dev_log.txt
 packages/desktop/test-req.mjs
 *.scratch.md
