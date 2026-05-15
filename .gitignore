@@ -70,9 +70,33 @@ cloudflare.log
 *.bak
 *.tmp
 coverage/
+coverage-final/
 .nyc_output/
+.vitest-cache/
+*.coverage
+
+# === Local AI tool memory ===
+memory/
+
+# === Local databases at any path ===
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+
+# === Persona runtime data (chat history, per-user memory, RAG trackers) ===
+# Seed content (persona.md, lore.md, knowledge/*.md) stays tracked.
+data/personas/*/history/
+data/personas/*/memory.json
+data/personas/*/rag_tracker.json
+packages/backend/data/personas/*/history/
+packages/backend/data/personas/*/memory.json
+packages/backend/data/personas/*/rag_tracker.json
 
 # === Local dev artifacts (not in git) ===
 .claude/worktrees/
+.claude/local/
+.claude/cache/
 dev_log.txt
 packages/desktop/test-req.mjs
+*.scratch.md

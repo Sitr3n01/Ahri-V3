@@ -17,8 +17,8 @@ This is **V3**: A complete rewrite from V2 (Python/Streamlit monolith) to a mode
 
 **V2 Location:** `C:\Users\zegil\Documents\GitHub\Ahri V2\Ahri\`
 **V3 Location:** `C:\Users\zegil\Documents\GitHub\Ahri V3\`
-**Technical Docs:** [DOCUMENTATION.md](./DOCUMENTATION.md)
-**Bug Report:** [BUG_REPORT.md](./BUG_REPORT.md)
+**Technical Docs:** [docs/architecture.md](./docs/architecture.md)
+**Bug Report:** [docs/development/bug-report.md](./docs/development/bug-report.md)
 
 ---
 
@@ -227,7 +227,7 @@ O Agent Mode original foi **removido** e substituído pelo V4 Engine — uma arq
 - Cleaned up temporary files (AGENT_MODE_STATUS.md, PHASE3_*.md, compass artifacts)
 - Added comprehensive documentation
 
-**See [BUG_REPORT.md](./BUG_REPORT.md) for full analysis.**
+**See [docs/development/bug-report.md](./docs/development/bug-report.md) for full analysis.**
 
 ---
 
@@ -391,7 +391,7 @@ npm run type-check --workspaces
 
 ## Documentation
 
-- **[DOCUMENTATION.md](./DOCUMENTATION.md)** - Complete technical documentation (134 KB)
+- **[docs/architecture.md](./docs/architecture.md)** - Complete technical documentation (134 KB)
   - Architecture overview
   - API endpoints
   - Database schema
@@ -400,7 +400,7 @@ npm run type-check --workspaces
   - Deployment guide
   - Troubleshooting
 
-- **[BUG_REPORT.md](./BUG_REPORT.md)** - Bug analysis & fixes
+- **[docs/development/bug-report.md](./docs/development/bug-report.md)** - Bug analysis & fixes
   - Critical bugs (race conditions, timeouts)
   - Medium bugs (memory leaks, validation)
   - Code quality issues
@@ -495,9 +495,9 @@ When adding features, reference these V2 source files:
 
 ## Support & Contributing
 
-**Issues:** Check [BUG_REPORT.md](./BUG_REPORT.md) for known issues
+**Issues:** Check [docs/development/bug-report.md](./docs/development/bug-report.md) for known issues
 
-**Documentation:** See [DOCUMENTATION.md](./DOCUMENTATION.md) for technical details
+**Documentation:** See [docs/architecture.md](./docs/architecture.md) for technical details
 
 **Testing:** Run `pytest` (backend) and `npm run type-check` (frontend)
 
